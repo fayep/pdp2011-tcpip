@@ -44,6 +44,43 @@
 ;	ethput return -ODDBUF): the XE driver uses .READ/.WRITE buffers as
 ;	given, and an odd one crashes the monitor (odd-address trap in kernel
 ;	mode). PDP-11 C does not word-align char arrays.
+;	int msgdcl(char *name, int maxmsg)
+;		.MESAG declare receiver: name (6 characters, space filled)
+;		accepting local messages from any job, at most maxmsg queued.
+;		A blank name needs no privilege. Returns 0 or a RSTS error.
+;	int msgrem(void)
+;		.MESAG remove this job's receivers.
+;	int msgsnd(char *name, int jobx2, char *params, char *buf, int len)
+;		.MESAG send local message: to receiver name (jobx2 = 0), or to
+;		job jobx2/2 on its RIB 0 (name = 0). params: 20 bytes copied to
+;		the receiver's FIRQB; buf/len: 0..512 data bytes.
+;	int msgrcv(char *params, char *buf, int size, int *jobx2)
+;		.MESAG receive, no wait. Returns the data byte count and fills
+;		params (20 bytes) and *jobx2 (sender's job number * 2), or minus
+;		a RSTS error (-5: no message waiting). A pending message also
+;		ends ethslp's sleep, so one sleep waits for frames and messages.
+;	int tickd(int *w)
+;		.DATE: w[0] = minutes until midnight, w[1] = seconds until the
+;		next minute, w[2] = ticks until the next second.
+;	int fatr(char *name, int *w)
+;		Read file name's attributes (UU.ATR) into w[0..10], opening it
+;		on channel ATRCH. Returns 0, 1 if the file has none, or minus a
+;		RSTS error. RMS words: w[0] record type/attributes, w[1] record
+;		size, w[2..3] highest block, w[4..5] end-of-file block (high
+;		word first), w[6] first free byte in that block.
+;	int fatw(char *name, int *w, int n)
+;		Write n (1..11) attribute words to file name. Returns 0 or minus
+;		a RSTS error.
+;	int fopn(char *name, int chan, unsigned *blocks)
+;		Open file name for reading on channel chan with RSTS calls (no
+;		RMS: C's stdio cannot open files that carry RMS attributes);
+;		*blocks gets its size in blocks. Returns 0 or minus an error.
+;	int fblk(int chan, char *buf, unsigned blk)
+;		Read block blk (1 = first) into buf (512 bytes, even address).
+;		Returns the bytes read, or minus an error (-11: end of file).
+;	int fcls(int chan)
+;	int fdel(char *name)
+;		Delete file name (RSTS call). Returns 0 or minus an error.
 ;	unsigned rpeek(unsigned addr)
 ;		.PEEK: one word of monitor memory (needs RDMEM).
 ;	int uutbl(int fn, char *buf)
@@ -53,12 +90,14 @@
 
 ETHHND	= 50		; Ethernet device handler index (XRBLKM)
 ODDBUF	= 377		; our error code: buffer at an odd address
+ATRCH	= 11.		; channel FATR/FATW open files on
 SAVSIZ	= 14		; R0-R5 saved on entry: 6 words
 RESULT	= SAVSIZ+2	; offsets once the registers are saved
 ARG1	= SAVSIZ+4
 ARG2	= SAVSIZ+6
 ARG3	= SAVSIZ+10
 ARG4	= SAVSIZ+12
+ARG5	= SAVSIZ+14
 
 	.PSECT	ETHIO,RO,I,GBL,REL,CON
 
@@ -211,6 +250,301 @@ ETHDET::
 	MOVB	#200,@#FIRQB+FQFIL	; this job; close the terminal channels
 	.UUO
 	CALL	ERRCOD
+	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+MSGDCL::
+	SAVE
+	CALL	CLRFQ
+	CALL	CLRXRB
+	MOVB	#1,@#FIRQB+FQFIL	; declare receiver
+	MOV	ARG1(SP),R0		; name, 6 bytes
+	MOV	#FIRQB+FQPPN,R1
+	MOV	#6,R2
+10$:	MOVB	(R0)+,(R1)+
+	SOB	R2,10$
+	MOVB	#1,@#FIRQB+FQEXT+1	; access: local senders, no privilege needed
+	MOV	#2048.,@#FIRQB+FQSIZ	; buffer maximum
+	MOVB	ARG2(SP),@#FIRQB+FQBUFL	; message maximum
+	.MESAG
+	CALL	ERRCOD
+	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+MSGREM::
+	SAVE
+	CALL	CLRFQ
+	CALL	CLRXRB
+	CLRB	@#FIRQB+FQFIL		; remove receiver
+	CLRB	@#FIRQB+FQSIZM		; this job's
+	.MESAG
+	CALL	ERRCOD
+	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+MSGSND::
+	SAVE
+	MOV	#ODDBUF,RESULT(SP)
+	BIT	#1,ARG4(SP)		; odd buffer: refuse it
+	BNE	90$
+	CALL	CLRFQ
+	CALL	CLRXRB
+	MOVB	#-1,@#FIRQB+FQFIL	; send local data message
+	MOVB	ARG2(SP),@#FIRQB+FQSIZM	; job * 2, or 0 to send by name
+	MOV	ARG1(SP),R0		; name, or 0
+	BEQ	20$
+	MOV	#FIRQB+FQPPN,R1
+	MOV	#6,R2
+10$:	MOVB	(R0)+,(R1)+
+	SOB	R2,10$
+20$:	MOV	ARG3(SP),R0		; parameters, 20 bytes
+	BEQ	40$
+	MOV	#FIRQB+FQEXT,R1
+	MOV	#20.,R2
+30$:	MOVB	(R0)+,(R1)+
+	SOB	R2,30$
+40$:	MOV	ARG5(SP),@#XRB+XRLEN
+	MOV	ARG5(SP),@#XRB+XRBC
+	MOV	ARG4(SP),@#XRB+XRLOC
+	.MESAG
+	CALL	ERRCOD
+	MOV	R0,RESULT(SP)
+90$:	RESTOR
+	RETURN
+
+MSGRCV::
+	SAVE
+	MOV	#-ODDBUF,RESULT(SP)
+	BIT	#1,ARG2(SP)		; odd buffer: refuse it
+	BNE	90$
+	CALL	CLRFQ
+	CALL	CLRXRB
+	MOVB	#2,@#FIRQB+FQFIL	; receive, no sleep, any sender, RIB 0
+	MOV	ARG3(SP),@#XRB+XRLEN
+	MOV	ARG2(SP),@#XRB+XRLOC
+	.MESAG
+	CALL	ERRCOD
+	TST	R0
+	BEQ	10$
+	NEG	R0
+	MOV	R0,RESULT(SP)
+	BR	90$
+10$:	MOV	#-1,RESULT(SP)		; not a local data message: skip it
+	CMPB	@#FIRQB+FQFIL,#-1
+	BNE	90$
+	MOV	ARG1(SP),R1		; parameters
+	BEQ	30$
+	MOV	#FIRQB+FQEXT,R0
+	MOV	#20.,R2
+20$:	MOVB	(R0)+,(R1)+
+	SOB	R2,20$
+30$:	MOV	ARG4(SP),R1		; sender's job number * 2
+	BEQ	40$
+	MOVB	@#FIRQB+FQSIZM,R0
+	BIC	#177400,R0
+	MOV	R0,(R1)
+40$:	MOV	@#XRB+XRBC,RESULT(SP)	; data bytes
+90$:	RESTOR
+	RETURN
+
+TICKD::
+	SAVE
+	CALL	CLRXRB
+	.DATE
+	MOV	ARG1(SP),R1
+	MOV	@#XRB+XRBC,(R1)+	; minutes until midnight
+	MOVB	@#XRB+XRLOC,R0		; seconds until the next minute
+	BIC	#177400,R0
+	MOV	R0,(R1)+
+	MOVB	@#XRB+XRLOC+1,R0	; ticks until the next second
+	BIC	#177400,R0
+	MOV	R0,(R1)+
+	CLR	RESULT(SP)
+	RESTOR
+	RETURN
+
+
+; open file name (ARG1, ASCIZ) on channel ATRCH; C clear if it worked,
+; else C set and R0 = error (R0-R2 used)
+ATROPN:	CALL	CLRFQ			; (these use R0 and R1)
+	CALL	CLRXRB
+	MOV	ARG1+2(SP),R0		; (one return address deeper)
+	MOV	R0,R1
+10$:	TSTB	(R1)+			; length of the name
+	BNE	10$
+	SUB	R0,R1
+	DEC	R1
+	MOV	R1,@#XRB+XRLEN
+	MOV	R1,@#XRB+XRBC
+	MOV	ARG1+2(SP),@#XRB+XRLOC
+	.FSS				; parse the name into the FIRQB
+	TSTB	@#FIRQB
+	BNE	20$
+	MOVB	#OPNFQ,@#FIRQB+FQFUN
+	MOVB	#ATRCH*2,@#FIRQB+FQFIL
+	CALFIP
+	TSTB	@#FIRQB
+	BNE	20$
+	CLC
+	RETURN
+20$:	CALL	ERRCOD
+	SEC
+	RETURN
+
+ATRCLS:	CALL	CLRFQ
+	MOVB	#CLSFQ,@#FIRQB+FQFUN
+	MOVB	#ATRCH*2,@#FIRQB+FQFIL
+	CALFIP
+	RETURN
+
+FATR::
+	SAVE
+	CALL	ATROPN
+	BCS	80$
+	CALL	CLRFQ
+	MOVB	#UU.ATR,@#FIRQB+FQFUN
+	MOVB	#ATRCH,@#FIRQB+FQFIL	; channel; FQSIZM 0 = read
+	.UUO
+	CALL	ERRCOD
+	TST	R0
+	BEQ	5$
+	NEG	R0			; error: minus the code
+	BR	70$
+5$:	MOV	#FIRQB+FQPPN,R0		; 11 attribute words
+	MOV	ARG2(SP),R1
+	MOV	#11.,R2
+10$:	MOV	(R0)+,(R1)+
+	SOB	R2,10$
+	CLR	R0
+	MOV	ARG2(SP),R1
+	TST	(R1)			; no attributes: first word 0
+	BNE	70$
+	INC	R0
+70$:	MOV	R0,-(SP)
+	CALL	ATRCLS
+	MOV	(SP)+,R0
+	BR	90$
+80$:	NEG	R0
+90$:	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+FATW::
+	SAVE
+	CALL	ATROPN
+	BCS	80$
+	CALL	CLRFQ
+	MOVB	#UU.ATR,@#FIRQB+FQFUN
+	MOVB	#ATRCH,@#FIRQB+FQFIL	; channel
+	MOVB	ARG3(SP),@#FIRQB+FQSIZM	; words to write
+	MOV	ARG2(SP),R0
+	MOV	#FIRQB+FQPPN,R1
+	MOV	ARG3(SP),R2
+10$:	MOV	(R0)+,(R1)+
+	SOB	R2,10$
+	.UUO
+	CALL	ERRCOD
+	MOV	R0,-(SP)
+	CALL	ATRCLS
+	MOV	(SP)+,R0
+80$:	NEG	R0
+	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+FOPN::
+	SAVE
+	CALL	CLRFQ
+	CALL	CLRXRB
+	MOV	ARG1(SP),R0
+	MOV	R0,R1
+10$:	TSTB	(R1)+			; length of the name
+	BNE	10$
+	SUB	R0,R1
+	DEC	R1
+	MOV	R1,@#XRB+XRLEN
+	MOV	R1,@#XRB+XRBC
+	MOV	R0,@#XRB+XRLOC
+	.FSS				; parse the name into the FIRQB
+	TSTB	@#FIRQB
+	BNE	80$
+	MOVB	#OPNFQ,@#FIRQB+FQFUN
+	MOV	ARG2(SP),R0
+	ASL	R0
+	MOVB	R0,@#FIRQB+FQFIL	; channel * 2
+	CALFIP
+	TSTB	@#FIRQB
+	BNE	80$
+	MOV	ARG3(SP),R1
+	BEQ	20$
+	MOV	@#FIRQB+FQSIZ,(R1)	; size in blocks
+20$:	CLR	RESULT(SP)
+	BR	90$
+80$:	CALL	ERRCOD
+	NEG	R0
+	MOV	R0,RESULT(SP)
+90$:	RESTOR
+	RETURN
+
+FBLK::
+	SAVE
+	MOV	#-ODDBUF,RESULT(SP)
+	BIT	#1,ARG2(SP)		; odd buffer: refuse it
+	BNE	90$
+	CALL	CLRXRB
+	MOV	#512.,@#XRB+XRLEN
+	MOV	ARG2(SP),@#XRB+XRLOC
+	MOV	ARG1(SP),R0
+	ASL	R0
+	MOVB	R0,@#XRB+XRCI
+	MOV	ARG3(SP),@#XRB+XRBLK	; block number
+	.READ
+	CALL	ERRCOD
+	TST	R0
+	BEQ	10$
+	NEG	R0
+	MOV	R0,RESULT(SP)
+	BR	90$
+10$:	MOV	@#XRB+XRBC,RESULT(SP)	; bytes read
+90$:	RESTOR
+	RETURN
+
+FCLS::
+	SAVE
+	CALL	CLRFQ
+	MOVB	#CLSFQ,@#FIRQB+FQFUN
+	MOV	ARG1(SP),R0
+	ASL	R0
+	MOVB	R0,@#FIRQB+FQFIL
+	CALFIP
+	CALL	ERRCOD
+	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+FDEL::
+	SAVE
+	CALL	CLRFQ
+	CALL	CLRXRB
+	MOV	ARG1(SP),R0
+	MOV	R0,R1
+10$:	TSTB	(R1)+			; length of the name
+	BNE	10$
+	SUB	R0,R1
+	DEC	R1
+	MOV	R1,@#XRB+XRLEN
+	MOV	R1,@#XRB+XRBC
+	MOV	R0,@#XRB+XRLOC
+	.FSS
+	TSTB	@#FIRQB
+	BNE	80$
+	MOVB	#DLNFQ,@#FIRQB+FQFUN	; delete by name
+	CALFIP
+80$:	CALL	ERRCOD
+	NEG	R0
 	MOV	R0,RESULT(SP)
 	RESTOR
 	RETURN

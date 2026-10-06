@@ -17,6 +17,7 @@
  *	MAC      xx-xx-xx-xx-xx-xx  override the controller address entirely
  *	DETACH   YES | NO         detach from the terminal once running
  *	UNIT     n                Ethernet controller XEn: (default 0)
+ *	TFTP     YES | NO         run the TFTP server (default YES)
  *
  * Without DECnet the controller's hardware address is read the way SHOW
  * DEVICE XE does it (170101/ushdev.b2s): monitor tables UU.TB1/UU.TB2, the
@@ -30,7 +31,7 @@
 #include "netcfg.h"
 
 unsigned char cfgmac[6], cfgip[4], cfgmsk[4], cfggw[4];
-int cfgdhc, cfgdet, cfgunt, cfgini;
+int cfgdhc, cfgdet, cfgunt, cfgini, cfgtft;
 char cfghst[33] = "RSTS";       /* host name sent to DHCP */
 char cfgwhy[100];
 
@@ -116,6 +117,7 @@ int cfgld()
 	cfgdhc = 1;           /* defaults: DHCP, stay attached, XE0: */
 	cfgdet = 0;
 	cfgunt = 0;
+	cfgtft = 1;
 	if ((cfgini = (f = fopen("TCPIP$:TCPIP.INI", "r")) != 0) != 0) {
 		while (fgets(line, sizeof line, f)) {
 			char *c = strchr(line, '!');
@@ -156,6 +158,8 @@ int cfgld()
 				strncpy(cfghst, val, 32);
 				cfghst[32] = 0;
 				hgiven = 1;
+			} else if (!strcmp(key, "TFTP")) {
+				cfgtft = val[0] == 'Y' || val[0] == 'y';
 			} else if (!strcmp(key, "UNIT")) {
 				cfgunt = atoi(val);
 			}

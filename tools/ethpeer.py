@@ -11,6 +11,7 @@ wire: it sends ARP requests, pings and (later) TFTP, and checks the replies.
 usage: ethpeer.py arp | ping [count] | sniff [seconds]
        ethpeer.py get <remote> <local> | put <local> <remote>
        ethpeer.py dhcpd <ip> <lease-seconds> <run-seconds>   (DHCP server, then ping+get)
+       ethpeer.py host <ip> <lease-seconds> <run-seconds>    (DHCP server + router/hosts for ping tests)
 """
 import socket, struct, sys, time, os
 
@@ -163,7 +164,7 @@ MYPORT = 40000 + os.getpid() % 20000
 def tftp_get(remote, local):
     if not resolve():
         return False
-    send(udp_frame(MYPORT, 69, b'\0\1' + remote.encode() + b'\0octet\0'))
+    send(udp_frame(MYPORT, 69, b'\0\1' + remote.encode() + b'\0' + os.environ.get('ETHPEER_MODE', 'octet').encode() + b'\0'))
     data = b''; expect = 1; t0 = time.time(); server = None
     while True:
         sp, p = udp_recv(MYPORT, 5)
@@ -189,7 +190,7 @@ def tftp_put(local, remote):
     if not resolve():
         return False
     data = open(local, 'rb').read()
-    send(udp_frame(MYPORT, 69, b'\0\2' + remote.encode() + b'\0octet\0'))
+    send(udp_frame(MYPORT, 69, b'\0\2' + remote.encode() + b'\0' + os.environ.get('ETHPEER_MODE', 'octet').encode() + b'\0'))
     sp, p = udp_recv(MYPORT, 5)
     if p is None or struct.unpack('!HH', p[:4]) != (4, 0):
         print('no ACK 0: %r' % (p,)); return False
@@ -230,13 +231,42 @@ def dhcp_reply(req, mtype, yiaddr, lease):
     h = h[:10] + struct.pack('!H', cksum(h)) + h[12:]
     send(b'\xff' * 6 + MY_MAC + b'\x08\x00' + h + u)
 
-def dhcpd(ip_s, lease, run):
+# "host" mode: the peer plays the router (192.168.50.1, which DHCP hands out),
+# itself, and one host on the other half of the /23, all on one MAC; it
+# answers ARP for those and echoes any ping sent to its MAC (as a router
+# would forward it), so a PDP-11 ping client can try every next-hop case.
+ANSWER_ARP = [bytes([192, 168, 50, 1]), MY_IP, bytes([192, 168, 50, 20])]
+
+def serve_frame(f):
+    if f[12:14] == b'\x08\x06' and len(f) >= 42:
+        a = f[14:]
+        if struct.unpack('!H', a[6:8])[0] == 1 and bytes(a[24:28]) in ANSWER_ARP:
+            rep = (bytes(a[8:14]) + MY_MAC + b'\x08\x06' + struct.pack('!HHBBH', 1, 0x0800, 6, 4, 2) +
+                   MY_MAC + bytes(a[24:28]) + bytes(a[8:14]) + bytes(a[14:18]))
+            send(rep)
+            print('%s ARP who-has %s from %s -> us' % (time.strftime('%H:%M:%S'), ip(a[24:28]), ip(a[14:18])))
+        return
+    if f[12:14] == b'\x08\x00' and f[0:6] == MY_MAC and f[23] == 1:
+        h = f[14:]; hl = (h[0] & 15) * 4; tot = struct.unpack('!H', h[2:4])[0]
+        ic = bytearray(h[hl:tot])
+        if ic[0] != 8:
+            return
+        ic[0] = 0; ic[2:4] = b'\0\0'; ic[2:4] = struct.pack('!H', cksum(bytes(ic)))
+        rh = bytearray(h[:hl]); rh[12:16], rh[16:20] = h[16:20], h[12:16]; rh[8] = 63
+        rh[10:12] = b'\0\0'; rh[10:12] = struct.pack('!H', cksum(bytes(rh)))
+        send(bytes(f[6:12]) + MY_MAC + b'\x08\x00' + bytes(rh) + bytes(ic))
+        print('%s echo %s -> %s seq %d: replied' % (time.strftime('%H:%M:%S'), ip(h[12:16]), ip(h[16:20]),
+              struct.unpack('!H', ic[6:8])[0]))
+
+def dhcpd(ip_s, lease, run, serve=False):
     global PDP_IP, PDP_MAC
     yiaddr = bytes(int(x) for x in ip_s.split('.'))
     end = time.time() + run; bound = 0; renewals = 0; tested = False
     names = {1: 'DISCOVER', 3: 'REQUEST', 4: 'DECLINE', 7: 'RELEASE', 8: 'INFORM'}
     while time.time() < end:
         for f in frames(min(2, max(0.1, end - time.time()))):
+            if serve:
+                serve_frame(f)
             if f[12:14] != b'\x08\x00' or f[23] != 17:
                 continue
             h = f[14:]; hl = (h[0] & 15) * 4; u = h[hl:]
@@ -258,7 +288,7 @@ def dhcpd(ip_s, lease, run):
                 if b[12:16] == yiaddr: renewals += 1
                 else: bound += 1
                 PDP_MAC = bytes(b[28:34])
-        if bound and not tested:
+        if bound and not tested and not serve:
             tested = True
             PDP_IP = yiaddr
             time.sleep(1)
@@ -270,6 +300,8 @@ def dhcpd(ip_s, lease, run):
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'dhcpd':
         sys.exit(0 if dhcpd(sys.argv[2], int(sys.argv[3]), float(sys.argv[4])) else 1)
+    if len(sys.argv) > 1 and sys.argv[1] == 'host':
+        dhcpd(sys.argv[2], int(sys.argv[3]), float(sys.argv[4]), serve=True); sys.exit(0)
     if len(sys.argv) > 1 and sys.argv[1] == 'get':
         sys.exit(0 if tftp_get(sys.argv[2], sys.argv[3]) else 1)
     if len(sys.argv) > 1 and sys.argv[1] == 'put':

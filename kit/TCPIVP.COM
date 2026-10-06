@@ -4,8 +4,9 @@ $! free for non-commercial use with attribution (see LICENSE).
 $ _SET NOON
 $ ISTAT$ == TRUE
 $ _WRITE 0 "Verifying RSTS/E TCP/IP product files"
-$ _IF F$SEARCH("AUTWRK$:TFTPD.TSK") .EQS. "" THEN ISTAT$ == FALSE
+$ _IF F$SEARCH("AUTWRK$:TCPIPD.TSK") .EQS. "" THEN ISTAT$ == FALSE
 $ _IF F$SEARCH("AUTWRK$:TCPIP.INS") .EQS. "" THEN ISTAT$ == FALSE
+$ _IF F$SEARCH("AUTWRK$:PING.TSK") .EQS. "" THEN ISTAT$ == FALSE
 $ _IF ISTAT$ THEN _WRITE 0 "TCP has passed."
-$ _IF .NOT. ISTAT$ THEN _WRITE 0 "TCP has failed: TFTPD.TSK or TCPIP.INS missing."
+$ _IF .NOT. ISTAT$ THEN _WRITE 0 "TCP has failed: TCPIPD.TSK, PING.TSK or TCPIP.INS missing."
 $ _EXIT

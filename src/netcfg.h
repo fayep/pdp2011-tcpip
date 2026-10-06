@@ -15,6 +15,7 @@
 /* netcfg.c: settings from TCPIP$:TCPIP.INI and the controller's address */
 extern unsigned char cfgmac[6], cfgip[4], cfgmsk[4], cfggw[4];
 extern int cfgdhc, cfgdet, cfgunt, cfgini;  /* cfgini: TCPIP.INI was read */
+extern int cfgtft;                       /* run the TFTP server (TFTP YES|NO) */
 extern char cfgwhy[];
 extern char cfghst[];            /* host name for DHCP */
 extern int cfgld(void);
@@ -31,6 +32,17 @@ extern int ethslp(int seconds);      /* int, not void: PDP-11 C reserves the res
                                         word only for non-void functions, and
                                         ethio.mac expects it */
 extern int ethdet(void);
+extern int msgdcl(char *name, int maxmsg);
+extern int msgrem(void);
+extern int msgsnd(char *name, int jobx2, char *params, char *buf, int len);
+extern int msgrcv(char *params, char *buf, int size, int *jobx2);
+extern int tickd(int *w);
+extern int fatr(char *name, int *w);
+extern int fatw(char *name, int *w, int n);
+extern int fopn(char *name, int chan, unsigned *blocks);
+extern int fblk(int chan, char *buf, unsigned blk);
+extern int fcls(int chan);
+extern int fdel(char *name);
 extern unsigned rpeek(unsigned addr);
 extern int uutbl(int fn, char *buf);
 

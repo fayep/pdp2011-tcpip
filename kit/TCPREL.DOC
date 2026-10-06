@@ -1,25 +1,44 @@
-RSTS/E TCP/IP V0.1 - release notes
+RSTS/E TCP/IP V0.2 - release notes
 Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0: free for
 non-commercial use with attribution.
 https://creativecommons.org/licenses/by-nc/4.0/
 
-A small IP stack for RSTS/E V10.1 that runs as an ordinary detached job on
-the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA). No monitor changes.
+A small IP stack for RSTS/E V10.1 that runs as an ordinary detached job,
+TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA). No
+monitor changes.
 
-  - TFTP server (RFC 1350): read and write, 512-byte blocks, files in FTP$:
-  - ARP and ping (ICMP echo)
+  - ARP (with a cache; requests for the next hop), ping replies
+  - PING command: PING a.b.c.d [count]  - replies with times, or "host
+    unreachable" / "network unreachable"; no privilege needed
+  - Routing by plain CIDR: hosts on our network (dst & mask) are reached
+    directly, anything else through the gateway (e.g. a /23 works)
   - DHCP client: address, mask, router and lease from your network; the
-    host name sent is the DECnet node name (or HOSTNAME)
+    host name sent is HOSTNAME, else the DECnet node name
+  - TFTP server (RFC 1350): read and write, files in FTP$:; TFTP NO in
+    TCPIP.INI turns it off. Exact lengths: a file written over TFTP gets
+    RMS attributes recording its true length, and a file with attributes
+    (TKB output, earlier TFTP writes) is sent up to that length
   - Coexists with DECnet/E: start DECnet first and give its node address
     (DECNET area.node name) in TCPIP$:TCPIP.INI
 
+Programs talk to TCPIPD with RSTS local messages (receiver "TCPIP "); see
+TCPMSG.H. PING is the first such client.
+
 Files (TCPIP$: = SY:[0,91]):
-  TFTPD.TSK   the server          TCPIP.INS  start-up file
-  TCPIP.INI   settings            *.C *.H *.MAC  sources
+  TCPIPD.TSK  the TCP/IP job     PING.TSK   the ping client
+  TCPIP.INI   settings           TCPIP.INS  start-up file (also defines PING)
+  *.C *.H *.MAC  sources
 
 Start at boot: add  $ @SY:[0,91]TCPIP.INS  to [0,1]START.COM.
-Use: tftp <address>, then get/put; file names are plain RSTS names
-(e.g. HELLO.C); files read back are padded with NULs to a 512-byte block.
+TFTP use: tftp <address>, then get/put; file names are plain RSTS names
+(e.g. HELLO.C). A file without RMS attributes (made by CREATE, an editor or
+C stdio) has no recorded length: netascii drops the NUL padding of its last
+block, binary (octet) sends whole 512-byte blocks.
 
-Known limits: one transfer at a time; no IP fragments; TFTP options
-(RFC 2347) are not supported; netascii is sent as stored (CR LF).
+Changes since V0.1: TFTPD is now TCPIPD, the general TCP/IP job; ARP
+requests and cache; CIDR next hop; local message receiver and the PING
+command; TFTP optional; TFTP keeps exact file lengths, can read files that
+carry RMS attributes (such as .TSK files) and replaces existing files.
+
+Known limits: one TFTP transfer at a time; no IP fragments; no TFTP
+options (RFC 2347); netascii is sent as stored (CR LF). No TCP yet.
