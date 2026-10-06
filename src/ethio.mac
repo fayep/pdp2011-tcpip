@@ -81,6 +81,21 @@
 ;	int fcls(int chan)
 ;	int fdel(char *name)
 ;		Delete file name (RSTS call). Returns 0 or minus an error.
+;	int dopn(char *name, int chan, int mode)
+;		Open device or file name on chan with open MODE mode (0: none).
+;		Returns FIRQB+FQSIZM (for a pseudo keyboard: its KB number) or
+;		minus an error.
+;	int drd(int chan, char *buf, int size, int recmod)
+;		.READ with XRB+XRMOD = recmod (RECORD). Returns bytes read or
+;		minus an error (-11: nothing there / end of file).
+;	int dwr(int chan, char *buf, int len, int recmod)
+;		.WRITE with XRB+XRMOD = recmod. Returns the bytes written (with
+;		RECORD 8192, no stall, or to a full pseudo keyboard, maybe fewer
+;		than len: such an error with data written counts as a partial
+;		write) or minus an error.
+;	int kbset(int kb, int off, int val)
+;		UU.TRM: set one terminal characteristic byte, FIRQB+off = val
+;		(e.g. off 012, val 0200: no XON) on KBkb:. Returns 0 or -error.
 ;	unsigned rpeek(unsigned addr)
 ;		.PEEK: one word of monitor memory (needs RDMEM).
 ;	int uutbl(int fn, char *buf)
@@ -544,6 +559,110 @@ FDEL::
 	MOVB	#DLNFQ,@#FIRQB+FQFUN	; delete by name
 	CALFIP
 80$:	CALL	ERRCOD
+	NEG	R0
+	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+DOPN::
+	SAVE
+	CALL	CLRFQ
+	CALL	CLRXRB
+	MOV	ARG1(SP),R0
+	MOV	R0,R1
+10$:	TSTB	(R1)+			; length of the name
+	BNE	10$
+	SUB	R0,R1
+	DEC	R1
+	MOV	R1,@#XRB+XRLEN
+	MOV	R1,@#XRB+XRBC
+	MOV	R0,@#XRB+XRLOC
+	.FSS
+	TSTB	@#FIRQB
+	BNE	80$
+	MOVB	#OPNFQ,@#FIRQB+FQFUN
+	MOV	ARG2(SP),R0
+	ASL	R0
+	MOVB	R0,@#FIRQB+FQFIL
+	MOV	ARG3(SP),R0		; mode, if any
+	BEQ	20$
+	BIS	#100000,R0		; mode given
+	MOV	R0,@#FIRQB+FQMODE
+20$:	CALFIP
+	TSTB	@#FIRQB
+	BNE	80$
+	MOVB	@#FIRQB+FQSIZM,R0	; e.g. a pseudo keyboard's KB number
+	BIC	#177400,R0
+	MOV	R0,RESULT(SP)
+	BR	90$
+80$:	CALL	ERRCOD
+	NEG	R0
+	MOV	R0,RESULT(SP)
+90$:	RESTOR
+	RETURN
+
+DRD::
+	SAVE
+	MOV	#-ODDBUF,RESULT(SP)
+	BIT	#1,ARG2(SP)
+	BNE	90$
+	CALL	CLRXRB
+	MOV	ARG3(SP),@#XRB+XRLEN
+	MOV	ARG2(SP),@#XRB+XRLOC
+	MOV	ARG1(SP),R0
+	ASL	R0
+	MOVB	R0,@#XRB+XRCI
+	MOV	ARG4(SP),@#XRB+XRMOD
+	.READ
+	CALL	ERRCOD
+	TST	R0
+	BEQ	10$
+	NEG	R0
+	MOV	R0,RESULT(SP)
+	BR	90$
+10$:	MOV	@#XRB+XRBC,RESULT(SP)
+90$:	RESTOR
+	RETURN
+
+DWR::
+	SAVE
+	MOV	#-ODDBUF,RESULT(SP)
+	BIT	#1,ARG2(SP)
+	BNE	90$
+	CALL	CLRXRB
+	MOV	ARG3(SP),@#XRB+XRLEN
+	MOV	ARG3(SP),@#XRB+XRBC
+	MOV	ARG2(SP),@#XRB+XRLOC
+	MOV	ARG1(SP),R0
+	ASL	R0
+	MOVB	R0,@#XRB+XRCI
+	MOV	ARG4(SP),@#XRB+XRMOD
+	.WRITE
+	CALL	ERRCOD
+	MOV	ARG3(SP),R1		; written = len - bytes still to go:
+	SUB	@#XRB+XRBC,R1		; a pseudo keyboard can take part of
+	TST	R0			; the data and then say "no room"
+	BEQ	70$
+	TST	R1
+	BGT	70$			; partly written: report that, not the error
+	NEG	R0
+	BR	80$
+70$:	MOV	R1,R0
+80$:	MOV	R0,RESULT(SP)
+90$:	RESTOR
+	RETURN
+
+KBSET::
+	SAVE
+	CALL	CLRFQ
+	MOVB	#UU.TRM,@#FIRQB+FQFUN
+	CLRB	@#FIRQB+FQFIL		; subfunction 0
+	MOVB	ARG1(SP),@#FIRQB+FQSIZM	; keyboard number
+	MOV	#FIRQB,R0
+	ADD	ARG2(SP),R0
+	MOVB	ARG3(SP),(R0)		; the one characteristic to change
+	.UUO
+	CALL	ERRCOD
 	NEG	R0
 	MOV	R0,RESULT(SP)
 	RESTOR

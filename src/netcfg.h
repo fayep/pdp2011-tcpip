@@ -43,6 +43,10 @@ extern int fopn(char *name, int chan, unsigned *blocks);
 extern int fblk(int chan, char *buf, unsigned blk);
 extern int fcls(int chan);
 extern int fdel(char *name);
+extern int dopn(char *name, int chan, int mode);
+extern int drd(int chan, char *buf, int size, int recmod);
+extern int dwr(int chan, char *buf, int len, int recmod);
+extern int kbset(int kb, int off, int val);
 extern unsigned rpeek(unsigned addr);
 extern int uutbl(int fn, char *buf);
 

@@ -48,7 +48,7 @@
 static unsigned bcastw[3] = { 0xFFFF, 0xFFFF, 0xFFFF };
 #define bcast ((unsigned char *)bcastw)
 /* kept in the task image: who wrote it and on what terms */
-static char cpyrt[] = "RSTS/E TCP/IP V0.2  Copyright (c) 2026 Faye Salwin\n"
+static char cpyrt[] = "RSTS/E TCP/IP V0.3  Copyright (c) 2026 Faye Salwin\n"
 	"CC BY-NC 4.0: free for non-commercial use with attribution\n";
 /* Frame buffers are word arrays: PDP-11 C does not align char arrays, and
  * the XE driver takes .READ/.WRITE buffers as given -- an odd one crashes
@@ -467,6 +467,7 @@ static unsigned char *next_hop(unsigned char *dst)
 }
 
 static void ping_arp_done(unsigned char *ip);
+static void tcp_arp_done(void);
 
 static void arp_input(int n)
 {
@@ -479,6 +480,7 @@ static void arp_input(int n)
 	if (ours(a + 24) || arp_find(a + 14)) {
 		arp_learn(a + 14, a + 8);       /* the sender, if it talks to us */
 		ping_arp_done(a + 14);
+		tcp_arp_done();
 	}
 	if (GET16(a + 6) != 1 || !ours(a + 24))
 		return;                         /* only requests for us get answers */
@@ -612,6 +614,10 @@ static void dhinput(unsigned char *b, int n)
 		if (o[0] == 51 && o[1] == 4) lease = get32(o + 2);
 		if (o[0] == 58 && o[1] == 4) t1 = get32(o + 2);
 		o += 2 + o[1];
+	}
+	if (!hsrv) {                    /* no server identifier (SLiRP): the sender */
+		memcpy(srv, pkt + ETH_HDR + 12, 4);
+		hsrv = 1;
 	}
 	if (dhst == DH_SELECT && type == 2 && hsrv) {           /* OFFER */
 		memcpy(dhoffr, b + 16, 4);
@@ -803,6 +809,525 @@ static void ping_tick()                 /* give up on unanswered ARP, forget old
 	}
 }
 
+/* ---- TCP (RFC 793, kept simple) ----
+ * Up to TCB_N connections, each tied to a pseudo keyboard: what the program
+ * writes to KBn: is read here from PKn: and sent; what arrives is written to
+ * PKn: and the program reads it from KBn:. One segment in flight at a time
+ * (at most SEG bytes), retransmitted with back-off; the receive window is the
+ * room in rbuf, which drains into the PK as the program reads.
+ */
+#define TCB_N    4
+#define T_FREE   0
+#define T_LISTEN 1
+#define T_ARP    2              /* active open waiting for the next hop's ARP */
+#define T_SYNSNT 3
+#define T_SYNRCV 4
+#define T_ESTAB  5
+#define T_FINW1  6
+#define T_FINW2  7
+#define T_CLOSEW 8
+#define T_CLOSNG 9
+#define T_LASTAK 10
+#define T_TIMEW  11
+#define TF_FIN 1
+#define TF_SYN 2
+#define TF_RST 4
+#define TF_PSH 8
+#define TF_ACK 16
+#define RTO_MAX 8               /* seconds */
+#define TRY_MAX 10
+
+static int tcb_chan[TCB_N] = { 8, 9, 14, 15 };  /* PK channels (stdio keeps to low ones) */
+
+static struct tcb {
+	int state;
+	int job2;                       /* owner: job number * 2 */
+	int kb;                         /* KB number of the PK */
+	int ready;                      /* owner has opened KBn: */
+	int closereq;                   /* owner asked to close */
+	int finsent, peerfin, eofsent;
+	int orphan;                     /* the owner is gone: reset and free */
+	unsigned char rip[4], hop[4], rmac[6];
+	unsigned lport, rport;
+	unsigned long iss, snd_una, snd_nxt, rcv_nxt;
+	unsigned snd_wnd;
+	int slen;                       /* bytes of sbuf in flight */
+	int rlen;                       /* bytes of rbuf not yet given to the PK */
+	int tries;
+	long sent, since;
+	int rto;
+	unsigned sbufw[SEG / 2], rbufw[SEG / 2];
+} tcb[TCB_N];
+static unsigned next_lport = 1024;
+
+static void tcp_event(struct tcb *t, int ev)
+{
+	memset(msgp, 0, 20);
+	msgp[0] = TM_TEVT;
+	msgp[1] = ev;
+	msgp[2] = t - tcb;
+	if (msgsnd((char *)0, t->job2, (char *)msgp, (char *)msgdw, 0) == 5)
+		t->orphan = 1;          /* ?Can't find: the program has ended */
+}
+
+static void tcp_conreply(int job2, int status, struct tcb *t)
+{
+	memset(msgp, 0, 20);
+	msgp[0] = TM_TCONR;
+	msgp[1] = status;
+	if (t) {
+		msgp[2] = t - tcb;
+		msgp[3] = t->kb;
+		memcpy(msgp + 4, t->rip, 4);
+		PUT16(msgp + 8, t->rport);
+	}
+	msgsnd((char *)0, job2, (char *)msgp, (char *)msgdw, 0);
+}
+
+static void tcp_free(struct tcb *t)
+{
+	if (t->state != T_FREE)
+		fcls(tcb_chan[t - tcb]);
+	t->state = T_FREE;
+}
+
+/* send a segment: flags, our sequence number seq, data (may be 0 bytes) */
+static void tcp_send(struct tcb *t, int flags, unsigned long seq, unsigned char *data, int dlen)
+{
+	unsigned char *h = out + ETH_HDR, *th = h + 20;
+	int i, hlen = flags & TF_SYN ? 24 : 20, n = hlen + dlen;
+	unsigned long s;
+	static unsigned ipid = 0x6000;
+	unsigned wnd = SEG - t->rlen;
+
+	for (i = 0; i < 6; i++) {
+		out[i] = t->rmac[i];
+		out[6 + i] = mymac[i];
+	}
+	out[12] = 0x08; out[13] = 0x00;
+	h[0] = 0x45; h[1] = 0;
+	PUT16(h + 2, 20 + n);
+	PUT16(h + 4, ++ipid);
+	PUT16(h + 6, 0x4000);                   /* don't fragment */
+	h[8] = 64; h[9] = 6;
+	PUT16(h + 10, 0);
+	memcpy(h + 12, myip, 4);
+	memcpy(h + 16, t->rip, 4);
+	PUT16(h + 10, cksum(h, 20));
+	PUT16(th, t->lport);
+	PUT16(th + 2, t->rport);
+	PUT16(th + 4, (unsigned)(seq >> 16));
+	PUT16(th + 6, (unsigned)seq);
+	PUT16(th + 8, (unsigned)(t->rcv_nxt >> 16));
+	PUT16(th + 10, (unsigned)t->rcv_nxt);
+	th[12] = (hlen / 4) << 4;
+	th[13] = flags | (t->state == T_SYNSNT ? 0 : TF_ACK);
+	PUT16(th + 14, wnd);
+	PUT16(th + 16, 0);
+	PUT16(th + 18, 0);
+	if (flags & TF_SYN) {                   /* MSS option */
+		th[20] = 2; th[21] = 4;
+		PUT16(th + 22, SEG);
+	}
+	if (dlen)
+		memcpy(th + hlen, data, dlen);
+	s = cksum_add(0L, myip, 4);
+	s = cksum_add(s, t->rip, 4);
+	s += 6;
+	s += (unsigned)n;
+	s = cksum_add(s, th, n);
+	PUT16(th + 16, (unsigned)~s & 0xFFFF);
+	n += ETH_HDR + 20;
+	ethput(CH_IP, (char *)out, n < 60 ? 60 : n);
+}
+
+static void tcp_rst(unsigned char *mac, unsigned char *ip, unsigned char *th, int dlen)
+{
+	struct tcb x;                   /* a throwaway TCB to describe the reply */
+	unsigned long seq, ack;
+	int flags = th[13];
+
+	if (flags & TF_RST)
+		return;
+	memset(&x, 0, sizeof x);
+	memcpy(x.rmac, mac, 6);
+	memcpy(x.rip, ip, 4);
+	x.lport = GET16(th + 2);
+	x.rport = GET16(th);
+	x.state = T_ESTAB;
+	x.rlen = SEG;                           /* window 0 */
+	seq = (unsigned long)GET16(th + 4) << 16 | GET16(th + 6);
+	ack = (unsigned long)GET16(th + 8) << 16 | GET16(th + 10);
+	if (flags & TF_ACK) {
+		x.rcv_nxt = 0;
+		tcp_send(&x, TF_RST, ack, (unsigned char *)0, 0);
+	} else {
+		x.rcv_nxt = seq + dlen + (flags & TF_SYN ? 1 : 0) + (flags & TF_FIN ? 1 : 0);
+		tcp_send(&x, TF_RST | TF_ACK, 0L, (unsigned char *)0, 0);
+	}
+}
+
+static struct tcb *tcp_new(int job2)    /* a free TCB with its PK open */
+{
+	int i, kb;
+	struct tcb *t;
+
+	for (i = 0; i < TCB_N; i++)
+		if (tcb[i].state == T_FREE)
+			break;
+	if (i == TCB_N)
+		return 0;
+	t = &tcb[i];
+	memset(t, 0, sizeof *t);
+	if ((kb = dopn("PK:", tcb_chan[i], 0)) < 0)
+		return 0;
+	kbset(kb, 012, 0200);                   /* no XON/XOFF into the data */
+	t->kb = kb;
+	t->job2 = job2;
+	t->rto = 1;
+	t->snd_wnd = SEG;
+	t->iss = (unsigned long)time((long *)0) << 8 ^ (unsigned long)i << 20;
+	t->snd_una = t->snd_nxt = t->iss;
+	return t;
+}
+
+static void tcp_connect(int job2, unsigned char *p)
+{
+	struct tcb *t;
+	struct arpe *e;
+	unsigned char *hop;
+
+	if (!ipup()) { tcp_conreply(job2, TS_DOWN, 0); return; }
+	if ((hop = next_hop(p + 2)) == 0) { tcp_conreply(job2, TS_NOROUTE, 0); return; }
+	if ((t = tcp_new(job2)) == 0) { tcp_conreply(job2, TS_BUSY, 0); return; }
+	memcpy(t->rip, p + 2, 4);
+	memcpy(t->hop, hop, 4);
+	t->rport = GET16(p + 6);
+	t->lport = next_lport++;
+	if (next_lport > 60000)
+		next_lport = 1024;
+	t->since = time((long *)0);
+	if ((e = arp_find(hop)) != 0) {
+		memcpy(t->rmac, e->mac, 6);
+		t->state = T_SYNSNT;
+		t->snd_nxt = t->iss + 1;
+		tcp_send(t, TF_SYN, t->iss, (unsigned char *)0, 0);
+		t->sent = time((long *)0);
+	} else {
+		t->state = T_ARP;
+		arp_request(hop);
+		t->sent = time((long *)0);
+	}
+}
+
+static void tcp_listen(int job2, unsigned char *p)
+{
+	struct tcb *t;
+	int i;
+
+	for (i = 0; i < TCB_N; i++)
+		if (tcb[i].state == T_LISTEN && tcb[i].lport == GET16(p + 6)) {
+			tcp_conreply(job2, TS_BUSY, 0);
+			return;
+		}
+	if ((t = tcp_new(job2)) == 0) { tcp_conreply(job2, TS_BUSY, 0); return; }
+	t->lport = GET16(p + 6);
+	t->state = T_LISTEN;
+}
+
+static void tcp_arp_done(void)          /* active opens waiting for ARP */
+{
+	struct arpe *e;
+	int i;
+
+	for (i = 0; i < TCB_N; i++)
+		if (tcb[i].state == T_ARP && (e = arp_find(tcb[i].hop)) != 0) {
+			memcpy(tcb[i].rmac, e->mac, 6);
+			tcb[i].state = T_SYNSNT;
+			tcb[i].snd_nxt = tcb[i].iss + 1;
+			tcp_send(&tcb[i], TF_SYN, tcb[i].iss, (unsigned char *)0, 0);
+			tcb[i].sent = time((long *)0);
+		}
+}
+
+static void tcp_input(unsigned char *ip, int hl, int tot)
+{
+	unsigned char *th = ip + hl, *data;
+	int doff, dlen, flags, i, n;
+	unsigned long seq, ack, s;
+	struct tcb *t = 0;
+	unsigned sport, dport;
+
+	if (tot - hl < 20)
+		return;
+	s = cksum_add(0L, ip + 12, 4);
+	s = cksum_add(s, ip + 16, 4);
+	s += 6;
+	s += (unsigned)(tot - hl);
+	if ((unsigned)~cksum_add(s, th, tot - hl) & 0xFFFF)
+		return;
+	doff = (th[12] >> 4) * 4;
+	if (doff < 20 || doff > tot - hl)
+		return;
+	data = th + doff;
+	dlen = tot - hl - doff;
+	flags = th[13];
+	sport = GET16(th);
+	dport = GET16(th + 2);
+	seq = (unsigned long)GET16(th + 4) << 16 | GET16(th + 6);
+	ack = (unsigned long)GET16(th + 8) << 16 | GET16(th + 10);
+	for (i = 0; i < TCB_N; i++)
+		if (tcb[i].state > T_LISTEN && tcb[i].lport == dport && tcb[i].rport == sport &&
+		    memcmp(tcb[i].rip, ip + 12, 4) == 0)
+			t = &tcb[i];
+	if (!t)
+		for (i = 0; i < TCB_N; i++)
+			if (tcb[i].state == T_LISTEN && tcb[i].lport == dport)
+				t = &tcb[i];
+	if (!t) {
+		tcp_rst(pkt + 6, ip + 12, th, dlen);
+		return;
+	}
+	if (t->state == T_LISTEN) {
+		if (flags & TF_RST)
+			return;
+		if (!(flags & TF_SYN) || (flags & TF_ACK)) {
+			tcp_rst(pkt + 6, ip + 12, th, dlen);
+			return;
+		}
+		memcpy(t->rip, ip + 12, 4);
+		memcpy(t->rmac, pkt + 6, 6);
+		arp_learn(ip + 12, pkt + 6);
+		t->rport = sport;
+		t->rcv_nxt = seq + 1;
+		t->snd_wnd = GET16(th + 14);
+		t->state = T_SYNRCV;
+		t->snd_nxt = t->iss + 1;
+		tcp_send(t, TF_SYN, t->iss, (unsigned char *)0, 0);
+		t->sent = t->since = time((long *)0);
+		return;
+	}
+	if (t->state == T_SYNSNT) {
+		if ((flags & TF_ACK) && ack != t->iss + 1)
+			return;
+		if (flags & TF_RST) {
+			if (flags & TF_ACK) {
+				tcp_conreply(t->job2, TS_REFUSED, t);
+				tcp_free(t);
+			}
+			return;
+		}
+		if ((flags & TF_SYN) && (flags & TF_ACK)) {
+			t->rcv_nxt = seq + 1;
+			t->snd_una = ack;
+			t->snd_wnd = GET16(th + 14);
+			t->state = T_ESTAB;
+			t->tries = 0;
+			t->rto = 1;
+			tcp_send(t, 0, t->snd_nxt, (unsigned char *)0, 0);
+			tcp_conreply(t->job2, TS_OK, t);
+		}
+		return;
+	}
+	if (flags & TF_RST) {
+		if (t->state != T_TIMEW)
+			tcp_event(t, TE_RESET);
+		tcp_free(t);
+		return;
+	}
+	if (flags & TF_ACK) {
+		if ((long)(ack - t->snd_una) > 0 && (long)(ack - t->snd_nxt) <= 0) {
+			n = (int)(ack - t->snd_una);
+			if (t->state == T_SYNRCV) {
+				n--;                            /* our SYN */
+				t->state = T_ESTAB;
+				tcp_conreply(t->job2, TS_OK, t);
+			}
+			if (t->finsent && ack == t->snd_nxt)
+				n--;                            /* our FIN */
+			if (n > 0 && t->slen > 0) {
+				if (n >= t->slen)
+					t->slen = 0;
+				else {                          /* partly acked: keep the rest */
+					memmove(t->sbufw, (unsigned char *)t->sbufw + n, t->slen - n);
+					t->slen -= n;
+				}
+			}
+			t->snd_una = ack;
+			t->tries = 0;
+			t->rto = 1;
+			if (t->finsent && ack == t->snd_nxt) {  /* our FIN is acked */
+				if (t->state == T_FINW1)
+					t->state = T_FINW2;
+				else if (t->state == T_CLOSNG) {
+					t->state = T_TIMEW;
+					t->since = time((long *)0);
+				} else if (t->state == T_LASTAK) {
+					if (!t->eofsent)
+						tcp_event(t, TE_EOF);
+					tcp_event(t, TE_CLOSED);
+					tcp_free(t);
+					return;
+				}
+			}
+		}
+		t->snd_wnd = GET16(th + 14);
+	}
+	if (seq != t->rcv_nxt) {                        /* out of order or old: re-ACK */
+		if (dlen || (flags & TF_FIN))
+			tcp_send(t, 0, t->snd_nxt, (unsigned char *)0, 0);
+		return;
+	}
+	n = 0;
+	if (dlen > 0 && !t->peerfin) {
+		n = dlen < SEG - t->rlen ? dlen : SEG - t->rlen;
+		memcpy((unsigned char *)t->rbufw + t->rlen, data, n);
+		t->rlen += n;
+		t->rcv_nxt += n;
+	}
+	if ((flags & TF_FIN) && n == dlen && !t->peerfin) {
+		t->peerfin = 1;
+		t->rcv_nxt++;
+		if (t->state == T_ESTAB)
+			t->state = T_CLOSEW;
+		else if (t->state == T_FINW1)
+			t->state = T_CLOSNG;
+		else if (t->state == T_FINW2) {
+			t->state = T_TIMEW;
+			t->since = time((long *)0);
+		}
+	}
+	if (dlen || (flags & TF_FIN))
+		tcp_send(t, 0, t->snd_nxt, (unsigned char *)0, 0);
+}
+
+static void tcp_close_req(int job2, unsigned char *p, int abort)
+{
+	struct tcb *t;
+
+	if (p[2] >= TCB_N || (t = &tcb[p[2]])->state == T_FREE || t->job2 != job2)
+		return;
+	if (abort || t->state <= T_SYNSNT) {
+		if (t->state > T_LISTEN && t->state != T_ARP)
+			tcp_send(t, TF_RST, t->snd_nxt, (unsigned char *)0, 0);
+		tcp_free(t);
+		return;
+	}
+	t->closereq = 1;
+}
+
+static int tcp_tick()                   /* move data, timers; 1 if anything happened */
+{
+	int i, n, busy = 0;
+	unsigned char *sb;
+	struct tcb *t;
+	long now = time((long *)0);
+
+	for (i = 0; i < TCB_N; i++) {
+		t = &tcb[i];
+		if (t->state == T_FREE)
+			continue;
+		if (t->orphan) {
+			if (t->state > T_LISTEN && t->state != T_ARP && t->state != T_TIMEW)
+				tcp_send(t, TF_RST, t->snd_nxt, (unsigned char *)0, 0);
+			tcp_free(t);
+			continue;
+		}
+		if (t->state == T_LISTEN)
+			continue;
+		if (t->state == T_ARP) {
+			if (now - t->sent >= 1) {
+				if (++t->tries > 3) {
+					tcp_conreply(t->job2, TS_NOARP, t);
+					tcp_free(t);
+				} else {
+					arp_request(t->hop);
+					t->sent = now;
+				}
+			}
+			continue;
+		}
+		if (t->state == T_TIMEW) {
+			if (now - t->since >= 2) {
+				if (t->peerfin && !t->eofsent && t->rlen == 0)
+					tcp_event(t, TE_EOF);
+				tcp_event(t, TE_CLOSED);
+				tcp_free(t);
+			}
+			continue;
+		}
+		/* what arrived: into the PK as the program makes room */
+		if (t->ready && t->rlen > 0) {
+			n = dwr(tcb_chan[i], (char *)t->rbufw, t->rlen, 1);
+			if (n > 0) {
+				int wasfull = t->rlen == SEG;
+				memmove(t->rbufw, (unsigned char *)t->rbufw + n, t->rlen - n);
+				t->rlen -= n;
+				busy = 1;
+				if (wasfull)                    /* window update */
+					tcp_send(t, 0, t->snd_nxt, (unsigned char *)0, 0);
+			}
+		}
+		if (t->ready && t->peerfin && t->rlen == 0 && !t->eofsent) {
+			t->eofsent = 1;
+			tcp_event(t, TE_EOF);
+		}
+		/* what the program wrote: out of the PK, one segment at a time */
+		sb = (unsigned char *)t->sbufw;
+		if (t->ready && t->slen == 0 && !t->finsent &&
+		    (t->state == T_ESTAB || t->state == T_CLOSEW) && t->snd_wnd > 0) {
+			n = drd(tcb_chan[i], (char *)sb, t->snd_wnd < SEG ? t->snd_wnd : SEG, 0);
+			if (n > 0) {
+				t->slen = n;
+				tcp_send(t, TF_PSH, t->snd_una, sb, n);
+				t->snd_nxt = t->snd_una + n;
+				t->sent = now;
+				busy = 1;
+			} else if (t->closereq) {               /* all sent: FIN */
+				t->finsent = 1;
+				tcp_send(t, TF_FIN, t->snd_nxt, (unsigned char *)0, 0);
+				t->snd_nxt++;
+				t->sent = now;
+				t->state = t->state == T_ESTAB ? T_FINW1 : T_LASTAK;
+				busy = 1;
+			}
+		}
+		/* retransmit: SYN, data or FIN not yet acknowledged */
+		if ((t->state == T_SYNSNT || t->state == T_SYNRCV || t->slen > 0 ||
+		     (t->finsent && t->snd_una != t->snd_nxt)) && now - t->sent >= t->rto) {
+			if (++t->tries > TRY_MAX) {
+				if (t->state == T_SYNSNT)
+					tcp_conreply(t->job2, TS_TIMEOUT, t);
+				else
+					tcp_event(t, TE_RESET);
+				tcp_send(t, TF_RST, t->snd_nxt, (unsigned char *)0, 0);
+				tcp_free(t);
+				continue;
+			}
+			if (t->state == T_SYNSNT || t->state == T_SYNRCV)
+				tcp_send(t, TF_SYN, t->iss, (unsigned char *)0, 0);
+			else if (t->slen > 0)
+				tcp_send(t, TF_PSH, t->snd_una, sb, t->slen);
+			else
+				tcp_send(t, TF_FIN, t->snd_nxt - 1, (unsigned char *)0, 0);
+			t->sent = now;
+			if (t->rto < RTO_MAX)
+				t->rto *= 2;
+		}
+	}
+	return busy;
+}
+
+static int tcp_active()                 /* anything that needs a short sleep */
+{
+	int i;
+
+	for (i = 0; i < TCB_N; i++)
+		if (tcb[i].state > T_LISTEN)
+			return 1;
+	return 0;
+}
+
 static int msg_input()                  /* serve queued requests; 1 if any */
 {
 	int n, job2, any = 0;
@@ -813,6 +1338,16 @@ static int msg_input()                  /* serve queued requests; 1 if any */
 			continue;               /* not a data message */
 		if (msgp[0] == TM_PING)
 			ping_request(job2, msgp);
+		else if (msgp[0] == TM_TCON)
+			tcp_connect(job2, msgp);
+		else if (msgp[0] == TM_TLSN)
+			tcp_listen(job2, msgp);
+		else if (msgp[0] == TM_TGO && msgp[2] < TCB_N && tcb[msgp[2]].job2 == job2)
+			tcb[msgp[2]].ready = 1;
+		else if (msgp[0] == TM_TCLS)
+			tcp_close_req(job2, msgp, 0);
+		else if (msgp[0] == TM_TABT)
+			tcp_close_req(job2, msgp, 1);
 	}
 	return any;
 }
@@ -838,6 +1373,11 @@ static void ip_input(int n)
 		return;                 /* fragments: not supported */
 	if (ip[9] == 1) {
 		icmp_echo(ip, hl, tot);
+		return;
+	}
+	if (ip[9] == 6) {
+		if (ipup() && ours(ip + 16))
+			tcp_input(ip, hl, tot);
 		return;
 	}
 	if (ip[9] != 17)
@@ -923,6 +1463,8 @@ int main()
 		if (msg_input())
 			busy = 1;
 		ping_tick();
+		if (tcp_tick())
+			busy = 1;
 		if (xf.active && xf.done && time((long *)0) - xf.sent >= 2 * RETRY_SEC) {
 			xf_end();               /* finished lingering after a write */
 		} else if (xf.active && !xf.done && time((long *)0) - xf.sent >= RETRY_SEC) {
@@ -939,6 +1481,8 @@ int main()
 		for (n = 0; n < PING_N; n++)
 			if (pq[n].job2)
 				nap = 1;
+		if (tcp_active())
+			nap = 1;
 		if (!busy)
 			ethslp(nap);
 	}

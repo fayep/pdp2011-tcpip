@@ -20,3 +20,25 @@
 #define TS_NOROUTE 2            /* off our network and no gateway */
 #define TS_DOWN    3            /* no address yet (DHCP) */
 #define TS_BUSY    4            /* too many requests outstanding */
+
+/* ---- TCP (V0.3) -------------------------------------------------------
+ * A connection's data flows through a pseudo keyboard: TCPIPD holds PKn:,
+ * the program opens the matching KBn: in binary mode (MODE 1), reads with
+ * RECORD 8192 (no wait) and writes with RECORD 4096 (binary). Control and
+ * events travel as messages. h = connection handle from TM_TCONR.
+ */
+#define TM_TCON   2             /* connect: p[2..5] address, p[6..7] port */
+#define TM_TLSN   3             /* listen: p[6..7] local port (one connection) */
+#define TM_TGO    4             /* p[2] h: KBn: is open, deliver data */
+#define TM_TCLS   5             /* p[2] h: send FIN once all data is sent */
+#define TM_TABT   6             /* p[2] h: abort (RST) */
+#define TM_TCONR  0x82          /* p[1] status, p[2] h, p[3] KB number,
+				   p[4..7] remote address, p[8..9] remote port */
+#define TM_TEVT   0x86          /* p[1] event, p[2] h */
+
+#define TE_EOF    1             /* the peer sent FIN: no more data after what is in KBn: */
+#define TE_RESET  2             /* connection reset or timed out */
+#define TE_CLOSED 3             /* both sides done: close KBn: */
+
+#define TS_REFUSED 5            /* RST in answer to our SYN */
+#define TS_TIMEOUT 6            /* no answer */
