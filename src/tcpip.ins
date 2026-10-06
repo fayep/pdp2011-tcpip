@@ -1,4 +1,4 @@
-$! TCPIP.INS - start TCP/IP for RSTS/E (ARP, ping, DHCP, TFTP server).
+$! TCPIP.INS - start TCP/IP for RSTS/E (TCPIPD, then the TFTP server).
 $! Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0:
 $! free for non-commercial use with attribution (see LICENSE).
 $! Call it from the system start-up file:   $ @SY:[0,91]TCPIP.INS
@@ -10,6 +10,7 @@ $ _IF F$SEARCH("TCPIP$:TCPIPD.TSK") .EQS. "" THEN _GOTO NONE
 $ _DEFINE/COMMAND/SYSTEM/REPLACE PING TCPIP$:PING.TSK
 $ _DEFINE/COMMAND/SYSTEM/REPLACE NC TCPIP$:NC.TSK
 $ _RUN TCPIP$:TCPIPD
+$ _IF F$SEARCH("TCPIP$:TFTPD.TSK") .NES. "" THEN _RUN TCPIP$:TFTPD
 $ _EXIT
 $NONE:
 $ _WRITE 0 "TCPIP.INS: TCPIP$:TCPIPD.TSK not found; TCP/IP not started"

@@ -42,3 +42,21 @@
 
 #define TS_REFUSED 5            /* RST in answer to our SYN */
 #define TS_TIMEOUT 6            /* no answer */
+
+/* ---- UDP sockets -------------------------------------------------------
+ * A datagram travels as one message: its first p[10] (0..9) bytes in
+ * p[11..19], the rest (up to 512) as message data, so 521 bytes fit: a TFTP
+ * data packet (4 + 512) included. u = socket handle from TM_UBNDR.
+ */
+#define TM_UBND   7             /* bind: p[6..7] local port, 0 = any */
+#define TM_USND   8             /* p[1] u, p[2..5] to address, p[6..7] to port,
+				   p[10..19] first bytes, data the rest */
+#define TM_UCLS   9             /* p[1] u: unbind */
+#define TM_UBNDR  0x87          /* p[1] status, p[2] u, p[6..7] the local port */
+#define TM_URCV   0x88          /* p[1] u, p[2..5] from address, p[6..7] from
+				   port, p[10..19] first bytes, data the rest */
+#define UDP_MAX   521           /* the largest datagram a socket carries */
+#define TM_TUNL   10            /* stop listening: p[6..7] local port */
+/* TM_TCONR also carries p[10..11] = the local port (for accept) */
+#define TM_TLSNR  0x83          /* p[1] status, p[6..7] the port */
+/* TM_TCONR p[12] = 1 for a connection that arrived on a listening port */

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0:
  * free for non-commercial use with attribution (see LICENSE). */
 /* tcpipd.c - the RSTS/E TCP/IP job: ARP, ICMP echo, UDP, DHCP client,
- * ping service for local programs, and a TFTP server (RFC 1350, optional).
+ * and, for local programs, ping, UDP sockets and TCP connections.
  *
  * One job, two Ethernet portals (IP and ARP), and the local message receiver
  * "TCPIP " (tcpmsg.h). The job polls the portals and its messages without
@@ -13,17 +13,8 @@
  * (plain CIDR, so a /23 works), else the gateway. ARP answers are kept in a
  * small cache; a request waits up to ARP_WAIT seconds for one.
  *
- * Files live only in FTP$: (a system logical for one account). Names are
- * upper-cased; anything with a device, account or directory is refused.
- * One transfer at a time; a second client gets "busy". netascii is sent as
- * stored: RSTS text files already end their lines with CR LF.
- *
- * Exact file lengths: a file written by TFTP gets RMS attributes (fixed
- * 512-byte records, end-of-file block and first free byte, as the task
- * builder writes them), so RSTS knows its true length. A file read is sent
- * up to the end its attributes record; one without attributes (C stdio and
- * CREATE write none) is sent in whole blocks, except that netascii drops the
- * NUL padding of the last block.
+ * What programs see is in tcpmsg.h; the socket library (sock.c) wraps it.
+ * Services such as TFTP are ordinary programs on that library (tftpd.c).
  */
 #include <stdio.h>
 #include <time.h>
@@ -33,11 +24,7 @@
 
 #define CH_IP   12
 #define CH_ARP  13
-#define CH_RD   10              /* TFTP reads: RSTS block I/O on this channel */
-#define TFTP_PORT 69
 #define SEG     512
-#define RETRY_SEC 2
-#define MAX_TRY 5
 #define ARP_N   8               /* ARP cache entries */
 #define ARP_AGE 600             /* seconds an ARP entry is trusted */
 #define ARP_WAIT 3              /* seconds to wait for an ARP reply */
@@ -57,29 +44,6 @@ static unsigned pktw[757];         /* received frame */
 #define pkt ((unsigned char *)pktw)
 static unsigned outw[757];         /* frame being sent: replies, DHCP */
 #define out ((unsigned char *)outw)
-static unsigned xoutw[757];        /* the transfer's frame, kept for resends:
-                                      nothing else may build in it */
-#define xout ((unsigned char *)xoutw)
-
-static struct {
-	int active, writing;            /* transfer in progress; WRQ */
-	int done;                       /* WRQ complete: file closed, lingering to re-ACK */
-	unsigned char mac[6], ip[4];    /* client */
-	unsigned cport, sport;          /* client and our transfer port */
-	FILE *f;                        /* WRQ: written with stdio */
-	int rd;                         /* RRQ: file open on CH_RD */
-	unsigned nblk;                  /* RRQ: its size in blocks */
-	unsigned block;                 /* last block sent (RRQ) or acked (WRQ) */
-	int len;                        /* bytes in xout[] for a retransmit */
-	int text;                       /* netascii */
-	long size;                      /* RRQ: exact length from attributes; -1 unknown */
-	char name[24];                  /* FTP$:NAME, for the attributes */
-	int last;                       /* RRQ: last block was short */
-	int tries;
-	long sent;                      /* time of the last send */
-	long bytes;
-} xf;
-static unsigned next_port = 1024;
 
 static struct arpe {
 	unsigned char ip[4], mac[6];
@@ -96,7 +60,7 @@ static struct pingq {
 
 static unsigned msgpw[10];              /* message parameters (20 bytes) */
 #define msgp ((unsigned char *)msgpw)
-static unsigned msgdw[128];             /* message data */
+static unsigned msgdw[256];             /* message data (512 bytes) */
 static int attached = 1;        /* still on the terminal: may print */
 
 static unsigned cksum_add(unsigned long s, unsigned char *p, int n)
@@ -182,223 +146,18 @@ static void udp_send(unsigned char *f, unsigned char *mac, unsigned char *ip, un
 }
 
 #define UDATA (out + ETH_HDR + 28)      /* UDP payload in out[] */
-#define TDATA (xout + ETH_HDR + 28)     /* the transfer's TFTP payload */
 
-static void tftp_error(unsigned char *mac, unsigned char *ip, unsigned dport, unsigned sport,
-		       int code, char *msg)
-{
-	int n = 0;
 
-	PUT16(UDATA, 5);
-	PUT16(UDATA + 2, code);
-	while (msg[n] && n < 100) {
-		UDATA[4 + n] = msg[n];
-		n++;
-	}
-	UDATA[4 + n] = 0;
-	udp_send(out, mac, ip, dport, sport, 4 + n + 1);
-}
 
-static void xf_send()                   /* (re)send what is in xout[] */
-{
-	udp_send(xout, xf.mac, xf.ip, xf.cport, xf.sport, xf.len);
-	xf.sent = time((long *)0);
-}
 
-static void xf_end()
-{
-	if (xf.f)
-		fclose(xf.f);
-	if (xf.rd)
-		fcls(CH_RD);
-	xf.f = 0;
-	xf.rd = 0;
-	xf.active = 0;
-	xf.done = 0;
-}
 
-static void rrq_next()                  /* read and send the next data block */
-{
-	unsigned blk = xf.block + 1;
-	int n = blk <= xf.nblk ? fblk(CH_RD, (char *)TDATA + 4, blk) : 0;
 
-	if (n < 0)
-		n = 0;
-	if (xf.size >= 0) {                     /* stop at the recorded end */
-		if (xf.bytes + n > xf.size)
-			n = xf.size > xf.bytes ? (int)(xf.size - xf.bytes) : 0;
-	} else if (xf.text && blk >= xf.nblk) { /* last block of a text file: no NULs */
-		while (n > 0 && TDATA[4 + n - 1] == 0)
-			n--;
-	}
-	xf.block++;
-	PUT16(TDATA, 3);
-	PUT16(TDATA + 2, xf.block);
-	xf.len = 4 + n;
-	xf.last = n < SEG;
-	xf.bytes += n;
-	xf.tries = 0;
-	xf_send();
-}
-
-static void wrq_ack()                   /* acknowledge xf.block */
-{
-	PUT16(TDATA, 4);
-	PUT16(TDATA + 2, xf.block);
-	xf.len = 4;
-	xf.tries = 0;
-	xf_send();
-}
-
-/* "name" from a request -> FTP$:NAME, or 0 if it is not a plain file name */
-static char *ftpname(unsigned char *p, int n, char *buf)
-{
-	int i;
-	char c;
-
-	strcpy(buf, "FTP$:");
-	for (i = 0; i < n && p[i]; i++) {
-		c = p[i];
-		if (c >= 'a' && c <= 'z')
-			c -= 'a' - 'A';
-		if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '$'))
-			return 0;
-		if (i >= 10)
-			return 0;
-		buf[5 + i] = c;
-	}
-	if (i == 0 || i >= n)
-		return 0;
-	buf[5 + i] = 0;
-	return buf;
-}
 
 /* RMS attributes for a file of len bytes: fixed 512-byte records, highest
  * block, end-of-file block and first free byte (as TKB writes them) */
-static void set_length(char *name, long len)
-{
-	int w[7];
-	long blocks = (len + SEG - 1) / SEG, eof = len / SEG + 1;
 
-	w[0] = 1;                               /* fixed-length records */
-	w[1] = SEG;
-	w[2] = (int)(blocks >> 16); w[3] = (int)blocks;
-	w[4] = (int)(eof >> 16);    w[5] = (int)eof;
-	w[6] = (int)(len % SEG);
-	fatw(name, w, 7);
-}
 
-static long get_length(char *name)              /* -1: no recorded length */
-{
-	int w[11];
-	long eof;
 
-	if (fatr(name, w) != 0)
-		return -1L;
-	eof = (long)(unsigned)w[4] << 16 | (unsigned)w[5];
-	if (eof == 0)
-		return -1L;
-	return (eof - 1) * SEG + (unsigned)w[6];
-}
-
-static void tftp_request(unsigned char *mac, unsigned char *ip, unsigned cport,
-			 unsigned char *t, int tlen)
-{
-	unsigned char *m;
-	unsigned op = GET16(t);
-	char name[24], *fn;
-
-	if (xf.active && xf.done)
-		xf_end();               /* a finished write was only lingering */
-	if (xf.active) {
-		if (cport == xf.cport && memcmp(ip, xf.ip, 4) == 0)
-			return;         /* the client resent its request */
-		tftp_error(mac, ip, cport, TFTP_PORT, 0, "busy, try again later");
-		return;
-	}
-	if ((fn = ftpname(t + 2, tlen - 2, name)) == 0) {
-		tftp_error(mac, ip, cport, TFTP_PORT, 2, "only plain file names in FTP$:");
-		return;
-	}
-	for (m = t + 2; m < t + tlen && *m; m++)
-		;                               /* the mode follows the name */
-	xf.text = m + 1 < t + tlen && (m[1] == 'n' || m[1] == 'N');
-	xf.size = op == 1 ? get_length(fn) : -1L;
-	strcpy(xf.name, fn);
-	xf.f = 0;
-	xf.rd = 0;
-	if (op == 1)
-		xf.rd = fopn(fn, CH_RD, &xf.nblk) == 0;
-	else {
-		fdel(fn);       /* TFTP replaces a file; stdio cannot open one with attributes */
-		xf.f = fopen(fn, "wb");
-	}
-	if (!xf.f && !xf.rd) {
-		tftp_error(mac, ip, cport, TFTP_PORT, op == 1 ? 1 : 2,
-			   op == 1 ? "file not found" : "cannot create file");
-		return;
-	}
-	memcpy(xf.mac, mac, 6);
-	memcpy(xf.ip, ip, 4);
-	xf.cport = cport;
-	xf.sport = next_port++;
-	if (next_port > 60000)
-		next_port = 1024;
-	xf.active = 1;
-	xf.writing = op == 2;
-	xf.done = 0;
-	xf.block = 0;
-	xf.bytes = 0;
-	if (op == 1)
-		rrq_next();
-	else
-		wrq_ack();
-}
-
-static void tftp_transfer(unsigned char *t, int tlen)
-{
-	unsigned op = GET16(t), blk = GET16(t + 2);
-
-	if (op == 5) {                  /* client gave up */
-		xf_end();
-		return;
-	}
-	if (!xf.writing && op == 4) {   /* ACK */
-		if (blk != xf.block)
-			return;
-		if (xf.last) {
-			xf_end();
-			return;
-		}
-		rrq_next();
-	} else if (xf.writing && op == 3) {     /* DATA */
-		if (xf.done) {                  /* our final ACK was lost */
-			if (blk == xf.block)
-				wrq_ack();
-			return;
-		}
-		if (blk == xf.block) {          /* duplicate: our ACK was lost */
-			wrq_ack();
-			return;
-		}
-		if (blk != xf.block + 1)
-			return;
-		if (tlen > 4 && fwrite(t + 4, 1, tlen - 4, xf.f) != tlen - 4) {
-			tftp_error(xf.mac, xf.ip, xf.cport, xf.sport, 3, "disk full or write error");
-			xf_end();
-			return;
-		}
-		xf.block = blk;
-		xf.bytes += tlen - 4;
-		wrq_ack();
-		if (tlen - 4 < SEG) {           /* last block: close, linger to re-ACK */
-			fclose(xf.f);
-			xf.f = 0;
-			xf.done = 1;
-			set_length(xf.name, xf.bytes);
-		}
-	}
-}
 
 /* ---- ARP cache and next hop ---- */
 static struct arpe *arp_find(unsigned char *ip)
@@ -468,6 +227,7 @@ static unsigned char *next_hop(unsigned char *dst)
 
 static void ping_arp_done(unsigned char *ip);
 static void tcp_arp_done(void);
+static void udp_arp_done(void);
 
 static void arp_input(int n)
 {
@@ -481,6 +241,7 @@ static void arp_input(int n)
 		arp_learn(a + 14, a + 8);       /* the sender, if it talks to us */
 		ping_arp_done(a + 14);
 		tcp_arp_done();
+		udp_arp_done();
 	}
 	if (GET16(a + 6) != 1 || !ours(a + 24))
 		return;                         /* only requests for us get answers */
@@ -861,6 +622,7 @@ static struct tcb {
 	int finpend;                    /* the peer's FIN arrived ahead of data */
 	int orphan;                     /* the owner is gone: reset and free */
 	int sackok;                     /* both sides allow SACK */
+	int passive;                    /* arrived on a listening port */
 	unsigned char rip[4], hop[4], rmac[6];
 	unsigned lport, rport;
 	unsigned long iss, snd_una, snd_nxt, rcv_nxt, finseq;
@@ -875,13 +637,14 @@ static struct tcb {
 	int tries;
 	long sent, since;
 	int rto;
-	unsigned sbufw[SWIN / 2], rbufw[RWIN / 2];
-} tcb[TCB_N];
+} tcb[TCB_N], rtcb;                     /* rtcb: for resets to strangers */
+static unsigned sbufw[TCB_N][SWIN / 2], rbufw[TCB_N][RWIN / 2];  /* kept apart:
+					   a TCB stays small enough to copy */
 static unsigned next_lport = 1024;
 static unsigned pkbufw[256];            /* PK reads: an even address for RSTS */
 
-#define SBUF(t) ((unsigned char *)(t)->sbufw)
-#define RBUF(t) ((unsigned char *)(t)->rbufw)
+#define SBUF(t) ((unsigned char *)sbufw[(t) - tcb])
+#define RBUF(t) ((unsigned char *)rbufw[(t) - tcb])
 
 static unsigned long get32(unsigned char *p);
 
@@ -905,8 +668,11 @@ static void tcp_conreply(int job2, int status, struct tcb *t)
 		msgp[3] = t->kb;
 		memcpy(msgp + 4, t->rip, 4);
 		PUT16(msgp + 8, t->rport);
+		PUT16(msgp + 10, t->lport);
+		msgp[12] = t->passive;
 	}
-	msgsnd((char *)0, job2, (char *)msgp, (char *)msgdw, 0);
+	if (msgsnd((char *)0, job2, (char *)msgp, (char *)msgdw, 0) == 5 && t)
+		t->orphan = 1;
 }
 
 static void tcp_free(struct tcb *t)
@@ -991,20 +757,18 @@ static void tcp_ack(struct tcb *t)
 
 static void tcp_rst(unsigned char *mac, unsigned char *ip, unsigned char *th, int dlen)
 {
-	struct tcb *x = &tcb[0];        /* borrow a TCB's fields, then put them back */
-	struct tcb save;
+	struct tcb *x = &rtcb;
 	unsigned long seq, ack;
 	int flags = th[13];
 
 	if (flags & TF_RST)
 		return;
-	memcpy(&save, x, sizeof save - sizeof save.sbufw - sizeof save.rbufw);
+	memset(x, 0, sizeof *x);
 	memcpy(x->rmac, mac, 6);
 	memcpy(x->rip, ip, 4);
 	x->lport = GET16(th + 2);
 	x->rport = GET16(th);
 	x->state = T_ESTAB;
-	x->sackok = 0;
 	x->rlen = RWIN;                         /* window 0 */
 	seq = get32(th + 4);
 	ack = get32(th + 8);
@@ -1015,7 +779,6 @@ static void tcp_rst(unsigned char *mac, unsigned char *ip, unsigned char *th, in
 		x->rcv_nxt = seq + dlen + (flags & TF_SYN ? 1 : 0) + (flags & TF_FIN ? 1 : 0);
 		tcp_send(x, TF_RST | TF_ACK, 0L, (unsigned char *)0, 0);
 	}
-	memcpy(x, &save, sizeof save - sizeof save.sbufw - sizeof save.rbufw);
 }
 
 static struct tcb *tcp_new(int job2)    /* a free TCB with its PK open */
@@ -1029,7 +792,7 @@ static struct tcb *tcp_new(int job2)    /* a free TCB with its PK open */
 	if (i == TCB_N)
 		return 0;
 	t = &tcb[i];
-	memset(t, 0, sizeof *t - sizeof t->sbufw - sizeof t->rbufw);
+	memset(t, 0, sizeof *t);
 	if ((kb = dopn("PK:", tcb_chan[i], 0)) < 0)
 		return 0;
 	kbset(kb, 012, 0200);                   /* no XON/XOFF into the data */
@@ -1077,19 +840,33 @@ static void tcp_connect(int job2, unsigned char *p)
 	}
 }
 
+static void tcp_lsnreply(int job2, int status, unsigned port)
+{
+	memset(msgp, 0, 20);
+	msgp[0] = TM_TLSNR;
+	msgp[1] = status;
+	PUT16(msgp + 6, port);
+	msgsnd((char *)0, job2, (char *)msgp, (char *)msgdw, 0);
+}
+
 static void tcp_listen(int job2, unsigned char *p)
 {
 	struct tcb *t;
+	unsigned port = GET16(p + 6);
 	int i;
 
 	for (i = 0; i < TCB_N; i++)
-		if (tcb[i].state == T_LISTEN && tcb[i].lport == GET16(p + 6)) {
-			tcp_conreply(job2, TS_BUSY, 0);
+		if (tcb[i].state == T_LISTEN && tcb[i].lport == port) {
+			tcp_lsnreply(job2, TS_BUSY, port);
 			return;
 		}
-	if ((t = tcp_new(job2)) == 0) { tcp_conreply(job2, TS_BUSY, 0); return; }
-	t->lport = GET16(p + 6);
+	if ((t = tcp_new(job2)) == 0) {
+		tcp_lsnreply(job2, TS_BUSY, port);
+		return;
+	}
+	t->lport = port;
 	t->state = T_LISTEN;
+	tcp_lsnreply(job2, TS_OK, port);
 }
 
 static void tcp_arp_done(void)          /* active opens waiting for ARP */
@@ -1304,12 +1081,20 @@ static void tcp_input(unsigned char *ip, int hl, int tot)
 		memcpy(t->rmac, pkt + 6, 6);
 		arp_learn(ip + 12, pkt + 6);
 		t->rport = sport;
+		t->passive = 1;
 		t->rcv_nxt = seq + 1;
 		t->snd_wnd = wnd;
 		tcp_options(t, th + 20, doff - 20, 1);
 		t->state = T_SYNRCV;
 		t->since = time((long *)0);
 		tcp_syn(t);
+		{                               /* keep listening for the next one */
+			struct tcb *nt = tcp_new(t->job2);
+			if (nt) {
+				nt->lport = t->lport;
+				nt->state = T_LISTEN;
+			}
+		}
 		return;
 	}
 	if (t->state == T_SYNSNT) {
@@ -1555,6 +1340,169 @@ static int tcp_active()                 /* anything that needs a short sleep */
 	return 0;
 }
 
+/* ---- UDP sockets for local programs ----
+ * A program binds a port (TM_UBND); datagrams for that port go to it as
+ * messages (TM_URCV) and it sends with TM_USND. A datagram whose next hop
+ * is not yet in the ARP cache waits in its socket for the ARP reply.
+ */
+#define UDS_N 8
+static struct uds {
+	int job2;                       /* owner, 0 = free */
+	unsigned lport;
+	int pend;                       /* a datagram waiting for ARP */
+	unsigned char pip[4], phop[4];
+	unsigned pport;
+	int plen;
+	long since;
+	unsigned pbufw[(UDP_MAX + 1) / 2];
+} uds[UDS_N];
+static unsigned next_uport = 49152;
+
+static void udp_reply_bind(int job2, int status, int u, unsigned port)
+{
+	memset(msgp, 0, 20);
+	msgp[0] = TM_UBNDR;
+	msgp[1] = status;
+	msgp[2] = u;
+	PUT16(msgp + 6, port);
+	msgsnd((char *)0, job2, (char *)msgp, (char *)msgdw, 0);
+}
+
+static int udp_port_free(unsigned port)
+{
+	int i;
+
+	if (port == 68)
+		return 0;                       /* our DHCP client */
+	for (i = 0; i < UDS_N; i++)
+		if (uds[i].job2 && uds[i].lport == port)
+			return 0;
+	return 1;
+}
+
+static void udp_bind(int job2, unsigned char *p)
+{
+	unsigned port = GET16(p + 6);
+	int i, u = -1;
+
+	for (i = 0; i < UDS_N; i++)
+		if (!uds[i].job2) {
+			u = i;
+			break;
+		}
+	if (u < 0) {
+		udp_reply_bind(job2, TS_BUSY, 0, 0);
+		return;
+	}
+	if (port == 0) {
+		do {
+			port = next_uport++;
+			if (next_uport == 0)
+				next_uport = 49152;
+		} while (!udp_port_free(port));
+	} else if (!udp_port_free(port)) {
+		udp_reply_bind(job2, TS_BUSY, 0, port);
+		return;
+	}
+	memset(&uds[u], 0, sizeof uds[u] - sizeof uds[u].pbufw);
+	uds[u].job2 = job2;
+	uds[u].lport = port;
+	udp_reply_bind(job2, TS_OK, u, port);
+}
+
+/* send what is at UDATA (len bytes) from socket s to ip:port via mac */
+static void udp_out(struct uds *s, unsigned char *mac, unsigned char *ip, unsigned port, int len)
+{
+	udp_send(out, mac, ip, port, s->lport, len);
+}
+
+static void udp_sendreq(int job2, unsigned char *p, unsigned char *data, int n)
+{
+	int u = p[1], k = p[10], len;
+	struct uds *s;
+	unsigned char *hop;
+	struct arpe *e;
+
+	if (u >= UDS_N || (s = &uds[u])->job2 != job2 || k > 9 || !ipup())
+		return;
+	len = k + n;
+	if (len > UDP_MAX)
+		return;
+	memcpy(UDATA, p + 11, k);
+	memcpy(UDATA + k, data, n);
+	if (p[2] == 255 && p[3] == 255 && p[4] == 255 && p[5] == 255) {
+		udp_out(s, bcast, p + 2, GET16(p + 6), len);
+		return;
+	}
+	if ((hop = next_hop(p + 2)) == 0)
+		return;                         /* no route: dropped, as UDP may */
+	if ((e = arp_find(hop)) != 0) {
+		udp_out(s, e->mac, p + 2, GET16(p + 6), len);
+		return;
+	}
+	memcpy(s->pbufw, UDATA, len);           /* wait for the ARP reply */
+	memcpy(s->pip, p + 2, 4);
+	memcpy(s->phop, hop, 4);
+	s->pport = GET16(p + 6);
+	s->plen = len;
+	s->pend = 1;
+	s->since = time((long *)0);
+	arp_request(hop);
+}
+
+static void udp_arp_done(void)
+{
+	struct arpe *e;
+	int i;
+
+	for (i = 0; i < UDS_N; i++)
+		if (uds[i].job2 && uds[i].pend && (e = arp_find(uds[i].phop)) != 0) {
+			memcpy(UDATA, uds[i].pbufw, uds[i].plen);
+			udp_out(&uds[i], e->mac, uds[i].pip, uds[i].pport, uds[i].plen);
+			uds[i].pend = 0;
+		}
+}
+
+static void udp_tick(void)              /* drop datagrams whose ARP never came */
+{
+	long now = time((long *)0);
+	int i;
+
+	for (i = 0; i < UDS_N; i++)
+		if (uds[i].job2 && uds[i].pend) {
+			if (now - uds[i].since >= ARP_WAIT)
+				uds[i].pend = 0;
+			else if (now - uds[i].since >= 1)
+				arp_request(uds[i].phop);
+		}
+}
+
+/* a datagram for a bound port: to its owner as a message */
+static void udp_deliver(unsigned char *ip, unsigned char *u, int ulen)
+{
+	unsigned dport = GET16(u + 2);
+	int i, dlen = ulen - 8, k;
+
+	for (i = 0; i < UDS_N; i++)
+		if (uds[i].job2 && uds[i].lport == dport)
+			break;
+	if (i == UDS_N)
+		return;                         /* nobody listens: dropped */
+	if (dlen > UDP_MAX)
+		dlen = UDP_MAX;
+	k = dlen > 512 ? dlen - 512 : 0;
+	memset(msgp, 0, 20);
+	msgp[0] = TM_URCV;
+	msgp[1] = i;
+	memcpy(msgp + 2, ip + 12, 4);
+	memcpy(msgp + 6, u, 2);                 /* from port, network order */
+	msgp[10] = k;
+	memcpy(msgp + 11, u + 8, k);
+	memcpy(msgdw, u + 8 + k, dlen - k);
+	if (msgsnd((char *)0, uds[i].job2, (char *)msgp, (char *)msgdw, dlen - k) == 5)
+		uds[i].job2 = 0;                /* the program has ended */
+}
+
 static int msg_input()                  /* serve queued requests; 1 if any */
 {
 	int n, job2, any = 0;
@@ -1575,6 +1523,18 @@ static int msg_input()                  /* serve queued requests; 1 if any */
 			tcp_close_req(job2, msgp, 0);
 		else if (msgp[0] == TM_TABT)
 			tcp_close_req(job2, msgp, 1);
+		else if (msgp[0] == TM_TUNL) {
+			int i;
+			for (i = 0; i < TCB_N; i++)
+				if (tcb[i].state == T_LISTEN && tcb[i].job2 == job2 &&
+				    tcb[i].lport == GET16(msgp + 6))
+					tcp_free(&tcb[i]);
+		} else if (msgp[0] == TM_UBND)
+			udp_bind(job2, msgp);
+		else if (msgp[0] == TM_USND)
+			udp_sendreq(job2, msgp, (unsigned char *)msgdw, n);
+		else if (msgp[0] == TM_UCLS && msgp[1] < UDS_N && uds[msgp[1]].job2 == job2)
+			uds[msgp[1]].job2 = 0;
 	}
 	return any;
 }
@@ -1619,26 +1579,12 @@ static void ip_input(int n)
 		return;
 	sport = GET16(u);
 	dport = GET16(u + 2);
-	if (ulen < 12)
-		return;
 	if (dport == 68) {
-		if (cfgdhc && sport == 67)
+		if (cfgdhc && sport == 67 && ulen >= 12)
 			dhinput(u + 8, ulen - 8);
 		return;
 	}
-	if (!cfgtft)
-		return;                 /* TFTP NO: nothing else listens on UDP */
-	if (dport == TFTP_PORT) {
-		unsigned op = GET16(u + 8);
-		if (op == 1 || op == 2)
-			tftp_request(pkt + 6, ip + 12, sport, u + 8, ulen - 8);
-	} else if (xf.active && dport == xf.sport && sport == xf.cport && memcmp(ip + 12, xf.ip, 4) == 0) {
-		tftp_transfer(u + 8, ulen - 8);
-	} else if (!xf.active || dport != xf.sport) {
-		unsigned op = GET16(u + 8);
-		if (op != 5)
-			tftp_error(pkt + 6, ip + 12, sport, dport, 5, "unknown transfer ID");
-	}
+	udp_deliver(ip, u, ulen);
 }
 
 int main()
@@ -1668,7 +1614,7 @@ int main()
 		printf("tcpipd: %d.%d.%d.%d", myip[0], myip[1], myip[2], myip[3]);
 	printf(" on XE%d: %02X-%02X-%02X-%02X-%02X-%02X", cfgunt,
 	       mymac[0], mymac[1], mymac[2], mymac[3], mymac[4], mymac[5]);
-	printf(cfgtft ? ", TFTP files in FTP$:\n" : ", TFTP off\n");
+	printf("\n");
 	if (cfgdet) {
 		if ((e = ethdet()) != 0)
 			printf("tcpipd: cannot detach, error %d; running attached\n", e);
@@ -1692,19 +1638,12 @@ int main()
 		ping_tick();
 		if (tcp_tick())
 			busy = 1;
-		if (xf.active && xf.done && time((long *)0) - xf.sent >= 2 * RETRY_SEC) {
-			xf_end();               /* finished lingering after a write */
-		} else if (xf.active && !xf.done && time((long *)0) - xf.sent >= RETRY_SEC) {
-			if (++xf.tries > MAX_TRY)
-				xf_end();               /* client vanished */
-			else
-				xf_send();
-			busy = 1;
-		}
+		udp_tick();
 		if (cfgdhc)
 			nap = dhtick();
-		if (xf.active)
-			nap = 1;
+		for (n = 0; n < UDS_N; n++)
+			if (uds[n].job2 && uds[n].pend)
+				nap = 1;
 		for (n = 0; n < PING_N; n++)
 			if (pq[n].job2)
 				nap = 1;

@@ -14,41 +14,16 @@
 #include <string.h>
 #include <stdlib.h>
 #include "netcfg.h"
-#include "tcpmsg.h"
-#include "tcplib.h"
+#include "sock.h"
 
 static unsigned bw[128], lw[64], fw[256];
 #define buf ((char *)bw)
 #define line ((char *)lw)
 
-static int parse_ip(char *s, unsigned char *ip)
-{
-	int a, b, c, d;
-
-	if (sscanf(s, "%d.%d.%d.%d", &a, &b, &c, &d) != 4 ||
-	    (a | b | c | d) < 0 || a > 255 || b > 255 || c > 255 || d > 255)
-		return 0;
-	ip[0] = a; ip[1] = b; ip[2] = c; ip[3] = d;
-	return 1;
-}
-
-static char *why(int s)
-{
-	switch (s) {
-	case TS_NOARP:   return "host unreachable";
-	case TS_NOROUTE: return "network unreachable";
-	case TS_DOWN:    return "TCP/IP has no address yet";
-	case TS_BUSY:    return "no free connection";
-	case TS_REFUSED: return "connection refused";
-	case TS_TIMEOUT: return "no answer";
-	}
-	return s > 100 ? "TCP/IP is not running" : "error";
-}
-
 int main(int argc, char **argv)
 {
-	unsigned char ip[4];
-	int h, n, listen = 0, sentfin = 0, idle;
+	struct sockaddr_in sa;
+	int h, ls, n, lsn = 0, sentfin = 0, idle, alen;
 	unsigned port;
 	char in[80], *a1, *a2, *file = 0;
 	unsigned blk = 0, nblk = 0;
@@ -72,9 +47,12 @@ int main(int argc, char **argv)
 		printf("?NC: give an address and a port, or -L and a port\n");
 		return 1;
 	}
-	listen = (a1[0] == '-' && (a1[1] == 'L' || a1[1] == 'l'));
+	lsn = (a1[0] == '-' && (a1[1] == 'L' || a1[1] == 'l'));
 	port = (unsigned)atol(a2);
-	if (!listen && !parse_ip(a1, ip)) {
+	memset(&sa, 0, sizeof sa);
+	sa.sin_family = AF_INET;
+	sa.sin_port = htons(port);
+	if (!lsn && (sa.sin_addr.s_addr = inet_addr(a1)) == INADDR_NONE) {
 		printf("?NC: give the address as a.b.c.d (names need DNS, not yet)\n");
 		return 1;
 	}
@@ -82,25 +60,35 @@ int main(int argc, char **argv)
 		printf("?NC: cannot open %s\n", file);
 		return 1;
 	}
-	if (tcpopn() != 0) {
-		printf("?NC: cannot declare a message receiver\n");
+	if ((h = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+		printf("?NC: %s\n", sostr(soerr));
 		return 1;
 	}
-	if (listen) {
+	if (lsn) {
+		ls = h;
+		if (bind(ls, (struct sockaddr *)&sa, sizeof sa) < 0 || listen(ls, 1) < 0) {
+			printf("?NC: %s\n", sostr(soerr));
+			return 1;
+		}
 		printf("Listening on port %u\n", port);
-		h = tcplsn(port);
-	} else
-		h = tcpcon(ip, port);
+		alen = sizeof sa;
+		h = accept(ls, (struct sockaddr *)&sa, &alen);
+		closesocket(ls);                /* one connection only */
+	} else if (connect(h, (struct sockaddr *)&sa, sizeof sa) < 0)
+		h = -1;
 	if (h < 0) {
-		printf("?NC: %s\n", why(-h));
+		printf("?NC: %s\n", sostr(soerr));
 		return 1;
 	}
-	printf("Connected %s %d.%d.%d.%d port %u (KB%d:)\n", listen ? "from" : "to",
-	       tcprip[0], tcprip[1], tcprip[2], tcprip[3], tcprpt, tcpkb(h));
+	alen = sizeof sa;
+	getpeername(h, (struct sockaddr *)&sa, &alen);
+	printf("Connected %s %s port %u (KB%d:)\n", lsn ? "from" : "to",
+	       inet_ntoa(sa.sin_addr), ntohs(sa.sin_port), sokb(h));
+	sonblk(h, 1);
 	fflush(stdout);
 	for (;;) {
 		idle = 1;
-		n = tcpred(h, buf, sizeof bw);
+		n = recv(h, buf, sizeof bw, 0);
 		if (n > 0) {
 			fwrite(buf, 1, n, stdout);
 			fflush(stdout);
@@ -108,9 +96,8 @@ int main(int argc, char **argv)
 		} else if (n == 0) {
 			printf("\n[connection closed by the other side]\n");
 			break;
-		} else if (n == -2) {
-			printf("\n[connection reset]\n");
-			tcpabt(h);
+		} else if (soerr != SE_AGAIN) {
+			printf("\n[%s]\n", sostr(soerr));
 			return 1;
 		}
 		if (file && !sentfin) {                         /* the next block of the file */
@@ -119,10 +106,10 @@ int main(int argc, char **argv)
 				while (n > 0 && ((char *)fw)[n - 1] == 0)
 					n--;            /* the NUL padding of the last block */
 			if (n > 0)
-				tcpwrt(h, (char *)fw, n);
+				send(h, (char *)fw, n, 0);
 			else {
 				fcls(10);
-				tcpfin(h);
+				shutdown(h, 1);
 				sentfin = 1;
 			}
 			idle = 0;
@@ -131,10 +118,10 @@ int main(int argc, char **argv)
 			if (n > 0) {
 				if (line[n - 1] == '\r')       /* the line ends CR: send CR LF */
 					line[n++] = '\n';
-				tcpwrt(h, line, n);
+				send(h, line, n, 0);
 				idle = 0;
 			} else if (n == -11) {                  /* CTRL/Z */
-				tcpfin(h);
+				shutdown(h, 1);
 				sentfin = 1;
 				idle = 0;
 			}
@@ -142,6 +129,6 @@ int main(int argc, char **argv)
 		if (idle)
 			ethslp(1);      /* typing, data or a message ends the sleep */
 	}
-	tcpcls(h);
+	closesocket(h);
 	return 0;
 }
