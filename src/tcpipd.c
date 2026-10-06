@@ -809,14 +809,26 @@ static void ping_tick()                 /* give up on unanswered ARP, forget old
 	}
 }
 
-/* ---- TCP (RFC 793, kept simple) ----
+/* ---- TCP (RFC 793; SACK, RFC 2018) ----
  * Up to TCB_N connections, each tied to a pseudo keyboard: what the program
  * writes to KBn: is read here from PKn: and sent; what arrives is written to
- * PKn: and the program reads it from KBn:. One segment in flight at a time
- * (at most SEG bytes), retransmitted with back-off; the receive window is the
- * room in rbuf, which drains into the PK as the program reads.
+ * PKn: and the program reads it from KBn:.
+ *
+ * Receiving: a RWIN-byte window. In-order data waits in rbuf[0..rlen) until
+ * the PK takes it; a segment that arrives out of order is parked at its place
+ * in the window (rbuf[rlen + (seq - rcv_nxt)]) and noted as a range; when the
+ * gap fills, the parked ranges that now join on are taken in. ACKs report
+ * the parked ranges as SACK blocks when the peer allowed SACK in its SYN.
+ *
+ * Sending: up to SWIN bytes buffered; segments of the peer's MSS go out while
+ * the peer's window allows. On a timeout, or three duplicate ACKs, the first
+ * unacknowledged stretch the peer has not SACKed is sent again, with back-off.
  */
 #define TCB_N    4
+#define RWIN     4096           /* receive window per connection */
+#define SWIN     2048           /* send buffer per connection */
+#define MSS_US   1460           /* the largest segment we take */
+#define NOOO     4              /* parked out-of-order ranges */
 #define T_FREE   0
 #define T_LISTEN 1
 #define T_ARP    2              /* active open waiting for the next hop's ARP */
@@ -846,19 +858,32 @@ static struct tcb {
 	int ready;                      /* owner has opened KBn: */
 	int closereq;                   /* owner asked to close */
 	int finsent, peerfin, eofsent;
+	int finpend;                    /* the peer's FIN arrived ahead of data */
 	int orphan;                     /* the owner is gone: reset and free */
+	int sackok;                     /* both sides allow SACK */
 	unsigned char rip[4], hop[4], rmac[6];
 	unsigned lport, rport;
-	unsigned long iss, snd_una, snd_nxt, rcv_nxt;
-	unsigned snd_wnd;
-	int slen;                       /* bytes of sbuf in flight */
-	int rlen;                       /* bytes of rbuf not yet given to the PK */
+	unsigned long iss, snd_una, snd_nxt, rcv_nxt, finseq;
+	unsigned snd_wnd, pmss;
+	int slen;                       /* bytes in sbuf from snd_una: sent and unsent */
+	int rlen;                       /* in-order bytes in rbuf not yet in the PK */
+	int nooo;                       /* parked ranges [oos, ooe) */
+	unsigned long oos[NOOO], ooe[NOOO];
+	int npsk;                       /* the peer's SACK blocks */
+	unsigned long pks[3], pke[3];
+	int dupacks;
 	int tries;
 	long sent, since;
 	int rto;
-	unsigned sbufw[SEG / 2], rbufw[SEG / 2];
+	unsigned sbufw[SWIN / 2], rbufw[RWIN / 2];
 } tcb[TCB_N];
 static unsigned next_lport = 1024;
+static unsigned pkbufw[256];            /* PK reads: an even address for RSTS */
+
+#define SBUF(t) ((unsigned char *)(t)->sbufw)
+#define RBUF(t) ((unsigned char *)(t)->rbufw)
+
+static unsigned long get32(unsigned char *p);
 
 static void tcp_event(struct tcb *t, int ev)
 {
@@ -891,20 +916,42 @@ static void tcp_free(struct tcb *t)
 	t->state = T_FREE;
 }
 
+static unsigned tcp_wnd(struct tcb *t)
+{
+	return RWIN - t->rlen;
+}
+
 /* send a segment: flags, our sequence number seq, data (may be 0 bytes) */
 static void tcp_send(struct tcb *t, int flags, unsigned long seq, unsigned char *data, int dlen)
 {
-	unsigned char *h = out + ETH_HDR, *th = h + 20;
-	int i, hlen = flags & TF_SYN ? 24 : 20, n = hlen + dlen;
+	unsigned char *h = out + ETH_HDR, *th = h + 20, *o;
+	int i, hlen, n, nb;
 	unsigned long s;
 	static unsigned ipid = 0x6000;
-	unsigned wnd = SEG - t->rlen;
 
 	for (i = 0; i < 6; i++) {
 		out[i] = t->rmac[i];
 		out[6 + i] = mymac[i];
 	}
 	out[12] = 0x08; out[13] = 0x00;
+	o = th + 20;                            /* options */
+	if (flags & TF_SYN) {
+		*o++ = 2; *o++ = 4;             /* MSS */
+		PUT16(o, MSS_US); o += 2;
+		*o++ = 1; *o++ = 1;             /* NOP NOP SACK-permitted */
+		*o++ = 4; *o++ = 2;
+	} else if (t->sackok && t->nooo > 0 && !(flags & TF_RST)) {
+		nb = t->nooo < 3 ? t->nooo : 3;
+		*o++ = 1; *o++ = 1;             /* NOP NOP SACK */
+		*o++ = 5; *o++ = 2 + 8 * nb;
+		for (i = 0; i < nb; i++) {
+			PUT16(o, (unsigned)(t->oos[i] >> 16)); PUT16(o + 2, (unsigned)t->oos[i]);
+			PUT16(o + 4, (unsigned)(t->ooe[i] >> 16)); PUT16(o + 6, (unsigned)t->ooe[i]);
+			o += 8;
+		}
+	}
+	hlen = o - th;
+	n = hlen + dlen;
 	h[0] = 0x45; h[1] = 0;
 	PUT16(h + 2, 20 + n);
 	PUT16(h + 4, ++ipid);
@@ -921,14 +968,10 @@ static void tcp_send(struct tcb *t, int flags, unsigned long seq, unsigned char 
 	PUT16(th + 8, (unsigned)(t->rcv_nxt >> 16));
 	PUT16(th + 10, (unsigned)t->rcv_nxt);
 	th[12] = (hlen / 4) << 4;
-	th[13] = flags | (t->state == T_SYNSNT ? 0 : TF_ACK);
-	PUT16(th + 14, wnd);
+	th[13] = flags | (t->state == T_SYNSNT && (flags & TF_SYN) ? 0 : TF_ACK);
+	PUT16(th + 14, tcp_wnd(t));
 	PUT16(th + 16, 0);
 	PUT16(th + 18, 0);
-	if (flags & TF_SYN) {                   /* MSS option */
-		th[20] = 2; th[21] = 4;
-		PUT16(th + 22, SEG);
-	}
 	if (dlen)
 		memcpy(th + hlen, data, dlen);
 	s = cksum_add(0L, myip, 4);
@@ -941,30 +984,38 @@ static void tcp_send(struct tcb *t, int flags, unsigned long seq, unsigned char 
 	ethput(CH_IP, (char *)out, n < 60 ? 60 : n);
 }
 
+static void tcp_ack(struct tcb *t)
+{
+	tcp_send(t, 0, t->snd_nxt, (unsigned char *)0, 0);
+}
+
 static void tcp_rst(unsigned char *mac, unsigned char *ip, unsigned char *th, int dlen)
 {
-	struct tcb x;                   /* a throwaway TCB to describe the reply */
+	struct tcb *x = &tcb[0];        /* borrow a TCB's fields, then put them back */
+	struct tcb save;
 	unsigned long seq, ack;
 	int flags = th[13];
 
 	if (flags & TF_RST)
 		return;
-	memset(&x, 0, sizeof x);
-	memcpy(x.rmac, mac, 6);
-	memcpy(x.rip, ip, 4);
-	x.lport = GET16(th + 2);
-	x.rport = GET16(th);
-	x.state = T_ESTAB;
-	x.rlen = SEG;                           /* window 0 */
-	seq = (unsigned long)GET16(th + 4) << 16 | GET16(th + 6);
-	ack = (unsigned long)GET16(th + 8) << 16 | GET16(th + 10);
+	memcpy(&save, x, sizeof save - sizeof save.sbufw - sizeof save.rbufw);
+	memcpy(x->rmac, mac, 6);
+	memcpy(x->rip, ip, 4);
+	x->lport = GET16(th + 2);
+	x->rport = GET16(th);
+	x->state = T_ESTAB;
+	x->sackok = 0;
+	x->rlen = RWIN;                         /* window 0 */
+	seq = get32(th + 4);
+	ack = get32(th + 8);
 	if (flags & TF_ACK) {
-		x.rcv_nxt = 0;
-		tcp_send(&x, TF_RST, ack, (unsigned char *)0, 0);
+		x->rcv_nxt = 0;
+		tcp_send(x, TF_RST, ack, (unsigned char *)0, 0);
 	} else {
-		x.rcv_nxt = seq + dlen + (flags & TF_SYN ? 1 : 0) + (flags & TF_FIN ? 1 : 0);
-		tcp_send(&x, TF_RST | TF_ACK, 0L, (unsigned char *)0, 0);
+		x->rcv_nxt = seq + dlen + (flags & TF_SYN ? 1 : 0) + (flags & TF_FIN ? 1 : 0);
+		tcp_send(x, TF_RST | TF_ACK, 0L, (unsigned char *)0, 0);
 	}
+	memcpy(x, &save, sizeof save - sizeof save.sbufw - sizeof save.rbufw);
 }
 
 static struct tcb *tcp_new(int job2)    /* a free TCB with its PK open */
@@ -978,17 +1029,25 @@ static struct tcb *tcp_new(int job2)    /* a free TCB with its PK open */
 	if (i == TCB_N)
 		return 0;
 	t = &tcb[i];
-	memset(t, 0, sizeof *t);
+	memset(t, 0, sizeof *t - sizeof t->sbufw - sizeof t->rbufw);
 	if ((kb = dopn("PK:", tcb_chan[i], 0)) < 0)
 		return 0;
 	kbset(kb, 012, 0200);                   /* no XON/XOFF into the data */
 	t->kb = kb;
 	t->job2 = job2;
 	t->rto = 1;
-	t->snd_wnd = SEG;
+	t->snd_wnd = 536;
+	t->pmss = 536;
 	t->iss = (unsigned long)time((long *)0) << 8 ^ (unsigned long)i << 20;
 	t->snd_una = t->snd_nxt = t->iss;
 	return t;
+}
+
+static void tcp_syn(struct tcb *t)
+{
+	t->snd_nxt = t->iss + 1;
+	tcp_send(t, TF_SYN, t->iss, (unsigned char *)0, 0);
+	t->sent = time((long *)0);
 }
 
 static void tcp_connect(int job2, unsigned char *p)
@@ -1010,9 +1069,7 @@ static void tcp_connect(int job2, unsigned char *p)
 	if ((e = arp_find(hop)) != 0) {
 		memcpy(t->rmac, e->mac, 6);
 		t->state = T_SYNSNT;
-		t->snd_nxt = t->iss + 1;
-		tcp_send(t, TF_SYN, t->iss, (unsigned char *)0, 0);
-		t->sent = time((long *)0);
+		tcp_syn(t);
 	} else {
 		t->state = T_ARP;
 		arp_request(hop);
@@ -1044,19 +1101,166 @@ static void tcp_arp_done(void)          /* active opens waiting for ARP */
 		if (tcb[i].state == T_ARP && (e = arp_find(tcb[i].hop)) != 0) {
 			memcpy(tcb[i].rmac, e->mac, 6);
 			tcb[i].state = T_SYNSNT;
-			tcb[i].snd_nxt = tcb[i].iss + 1;
-			tcp_send(&tcb[i], TF_SYN, tcb[i].iss, (unsigned char *)0, 0);
-			tcb[i].sent = time((long *)0);
+			tcp_syn(&tcb[i]);
 		}
+}
+
+/* options of an incoming segment: MSS and SACK-permitted on a SYN, SACK
+ * blocks on an ACK */
+static void tcp_options(struct tcb *t, unsigned char *o, int len, int syn)
+{
+	int k, l, i;
+
+	if (!syn)
+		t->npsk = 0;
+	while (len > 0) {
+		k = o[0];
+		if (k == 0)
+			break;
+		if (k == 1) {
+			o++; len--;
+			continue;
+		}
+		if (len < 2 || (l = o[1]) < 2 || l > len)
+			break;
+		if (syn && k == 2 && l == 4) {
+			t->pmss = GET16(o + 2);
+			if (t->pmss > MSS_US)
+				t->pmss = MSS_US;
+			if (t->pmss < 64)
+				t->pmss = 64;
+		} else if (syn && k == 4 && l == 2)
+			t->sackok = 1;
+		else if (!syn && k == 5)
+			for (i = 0; i < (l - 2) / 8 && i < 3; i++) {
+				t->pks[i] = get32(o + 2 + 8 * i);
+				t->pke[i] = get32(o + 6 + 8 * i);
+				t->npsk = i + 1;
+			}
+		o += l; len -= l;
+	}
+}
+
+/* take in [seq, seq + len) of data (already trimmed to the window) */
+static void tcp_take(struct tcb *t, unsigned long seq, unsigned char *data, int len)
+{
+	int i, j, off;
+	unsigned long end = seq + len;
+
+	off = t->rlen + (int)(seq - t->rcv_nxt);
+	memcpy(RBUF(t) + off, data, len);
+	if (seq == t->rcv_nxt) {
+		t->rlen += len;
+		t->rcv_nxt = end;
+		for (i = 0; i < t->nooo; ) {            /* parked data that now joins on */
+			if ((long)(t->oos[i] - t->rcv_nxt) <= 0) {
+				if ((long)(t->ooe[i] - t->rcv_nxt) > 0) {
+					t->rlen += (int)(t->ooe[i] - t->rcv_nxt);
+					t->rcv_nxt = t->ooe[i];
+				}
+				for (j = i; j < t->nooo - 1; j++) {
+					t->oos[j] = t->oos[j + 1];
+					t->ooe[j] = t->ooe[j + 1];
+				}
+				t->nooo--;
+				i = 0;                  /* the new end may reach another */
+			} else
+				i++;
+		}
+		return;
+	}
+	for (i = 0; i < t->nooo; i++)           /* join an overlapping/adjoining range */
+		if ((long)(seq - t->ooe[i]) <= 0 && (long)(end - t->oos[i]) >= 0) {
+			if ((long)(seq - t->oos[i]) < 0) t->oos[i] = seq;
+			if ((long)(end - t->ooe[i]) > 0) t->ooe[i] = end;
+			for (j = 0; j < t->nooo; j++)   /* it may now touch another */
+				if (j != i && (long)(t->oos[j] - t->ooe[i]) <= 0 &&
+				    (long)(t->ooe[j] - t->oos[i]) >= 0) {
+					if ((long)(t->oos[j] - t->oos[i]) < 0) t->oos[i] = t->oos[j];
+					if ((long)(t->ooe[j] - t->ooe[i]) > 0) t->ooe[i] = t->ooe[j];
+					t->oos[j] = t->oos[t->nooo - 1];
+					t->ooe[j] = t->ooe[t->nooo - 1];
+					t->nooo--;
+					break;
+				}
+			return;
+		}
+	if (t->nooo < NOOO) {                   /* a new range, most recent first */
+		for (j = t->nooo; j > 0; j--) {
+			t->oos[j] = t->oos[j - 1];
+			t->ooe[j] = t->ooe[j - 1];
+		}
+		t->oos[0] = seq;
+		t->ooe[0] = end;
+		t->nooo++;
+	}       /* else: no room to note it; the peer sends it again */
+}
+
+static void tcp_peerfin(struct tcb *t)
+{
+	t->peerfin = 1;
+	t->finpend = 0;
+	t->rcv_nxt++;
+	if (t->state == T_ESTAB)
+		t->state = T_CLOSEW;
+	else if (t->state == T_FINW1)
+		t->state = T_CLOSNG;
+	else if (t->state == T_FINW2) {
+		t->state = T_TIMEW;
+		t->since = time((long *)0);
+	}
+}
+
+/* the first unacknowledged stretch the peer has not SACKed: offset in sbuf */
+static int tcp_hole(struct tcb *t)
+{
+	unsigned long s = t->snd_una;
+	int i, moved = 1;
+
+	while (moved) {
+		moved = 0;
+		for (i = 0; i < t->npsk; i++)
+			if ((long)(t->pks[i] - s) <= 0 && (long)(t->pke[i] - s) > 0) {
+				s = t->pke[i];
+				moved = 1;
+			}
+	}
+	if ((long)(s - t->snd_nxt) >= 0)
+		s = t->snd_una;
+	return (int)(s - t->snd_una);
+}
+
+static void tcp_resend(struct tcb *t)
+{
+	int off, len, inflight = (int)(t->snd_nxt - t->snd_una);
+
+	if (t->state == T_SYNSNT || t->state == T_SYNRCV) {
+		tcp_send(t, TF_SYN, t->iss, (unsigned char *)0, 0);
+		return;
+	}
+	if (t->finsent && inflight == 1 && t->slen == 0) {
+		tcp_send(t, TF_FIN, t->finseq, (unsigned char *)0, 0);
+		return;
+	}
+	if (t->slen == 0 || inflight <= 0)
+		return;
+	off = tcp_hole(t);
+	len = inflight - off;
+	if (len > t->slen - off)
+		len = t->slen - off;
+	if (len > (int)t->pmss)
+		len = t->pmss;
+	if (len > 0)
+		tcp_send(t, TF_PSH, t->snd_una + off, SBUF(t) + off, len);
 }
 
 static void tcp_input(unsigned char *ip, int hl, int tot)
 {
 	unsigned char *th = ip + hl, *data;
 	int doff, dlen, flags, i, n;
-	unsigned long seq, ack, s;
+	unsigned long seq, ack, s, wend;
 	struct tcb *t = 0;
-	unsigned sport, dport;
+	unsigned sport, dport, wnd;
 
 	if (tot - hl < 20)
 		return;
@@ -1074,8 +1278,9 @@ static void tcp_input(unsigned char *ip, int hl, int tot)
 	flags = th[13];
 	sport = GET16(th);
 	dport = GET16(th + 2);
-	seq = (unsigned long)GET16(th + 4) << 16 | GET16(th + 6);
-	ack = (unsigned long)GET16(th + 8) << 16 | GET16(th + 10);
+	seq = get32(th + 4);
+	ack = get32(th + 8);
+	wnd = GET16(th + 14);
 	for (i = 0; i < TCB_N; i++)
 		if (tcb[i].state > T_LISTEN && tcb[i].lport == dport && tcb[i].rport == sport &&
 		    memcmp(tcb[i].rip, ip + 12, 4) == 0)
@@ -1100,11 +1305,11 @@ static void tcp_input(unsigned char *ip, int hl, int tot)
 		arp_learn(ip + 12, pkt + 6);
 		t->rport = sport;
 		t->rcv_nxt = seq + 1;
-		t->snd_wnd = GET16(th + 14);
+		t->snd_wnd = wnd;
+		tcp_options(t, th + 20, doff - 20, 1);
 		t->state = T_SYNRCV;
-		t->snd_nxt = t->iss + 1;
-		tcp_send(t, TF_SYN, t->iss, (unsigned char *)0, 0);
-		t->sent = t->since = time((long *)0);
+		t->since = time((long *)0);
+		tcp_syn(t);
 		return;
 	}
 	if (t->state == T_SYNSNT) {
@@ -1120,11 +1325,12 @@ static void tcp_input(unsigned char *ip, int hl, int tot)
 		if ((flags & TF_SYN) && (flags & TF_ACK)) {
 			t->rcv_nxt = seq + 1;
 			t->snd_una = ack;
-			t->snd_wnd = GET16(th + 14);
+			t->snd_wnd = wnd;
+			tcp_options(t, th + 20, doff - 20, 1);
 			t->state = T_ESTAB;
 			t->tries = 0;
 			t->rto = 1;
-			tcp_send(t, 0, t->snd_nxt, (unsigned char *)0, 0);
+			tcp_ack(t);
 			tcp_conreply(t->job2, TS_OK, t);
 		}
 		return;
@@ -1136,6 +1342,7 @@ static void tcp_input(unsigned char *ip, int hl, int tot)
 		return;
 	}
 	if (flags & TF_ACK) {
+		tcp_options(t, th + 20, doff - 20, 0);
 		if ((long)(ack - t->snd_una) > 0 && (long)(ack - t->snd_nxt) <= 0) {
 			n = (int)(ack - t->snd_una);
 			if (t->state == T_SYNRCV) {
@@ -1145,17 +1352,17 @@ static void tcp_input(unsigned char *ip, int hl, int tot)
 			}
 			if (t->finsent && ack == t->snd_nxt)
 				n--;                            /* our FIN */
-			if (n > 0 && t->slen > 0) {
-				if (n >= t->slen)
-					t->slen = 0;
-				else {                          /* partly acked: keep the rest */
-					memmove(t->sbufw, (unsigned char *)t->sbufw + n, t->slen - n);
-					t->slen -= n;
-				}
+			if (n > t->slen)
+				n = t->slen;
+			if (n > 0) {
+				memmove(SBUF(t), SBUF(t) + n, t->slen - n);
+				t->slen -= n;
 			}
 			t->snd_una = ack;
 			t->tries = 0;
 			t->rto = 1;
+			t->dupacks = 0;
+			t->sent = time((long *)0);      /* restart the timer */
 			if (t->finsent && ack == t->snd_nxt) {  /* our FIN is acked */
 				if (t->state == T_FINW1)
 					t->state = T_FINW2;
@@ -1170,35 +1377,40 @@ static void tcp_input(unsigned char *ip, int hl, int tot)
 					return;
 				}
 			}
+		} else if (ack == t->snd_una && dlen == 0 && !(flags & (TF_SYN | TF_FIN)) &&
+			   t->snd_una != t->snd_nxt && wnd == t->snd_wnd) {
+			if (++t->dupacks == 3) {                /* fast retransmit */
+				tcp_resend(t);
+				t->sent = time((long *)0);
+			}
 		}
-		t->snd_wnd = GET16(th + 14);
+		t->snd_wnd = wnd;
 	}
-	if (seq != t->rcv_nxt) {                        /* out of order or old: re-ACK */
-		if (dlen || (flags & TF_FIN))
-			tcp_send(t, 0, t->snd_nxt, (unsigned char *)0, 0);
-		return;
-	}
-	n = 0;
+	/* data: trim to what is new and fits the window, then take it in */
 	if (dlen > 0 && !t->peerfin) {
-		n = dlen < SEG - t->rlen ? dlen : SEG - t->rlen;
-		memcpy((unsigned char *)t->rbufw + t->rlen, data, n);
-		t->rlen += n;
-		t->rcv_nxt += n;
-	}
-	if ((flags & TF_FIN) && n == dlen && !t->peerfin) {
-		t->peerfin = 1;
-		t->rcv_nxt++;
-		if (t->state == T_ESTAB)
-			t->state = T_CLOSEW;
-		else if (t->state == T_FINW1)
-			t->state = T_CLOSNG;
-		else if (t->state == T_FINW2) {
-			t->state = T_TIMEW;
-			t->since = time((long *)0);
+		if ((long)(seq - t->rcv_nxt) < 0) {            /* starts with old data */
+			n = (int)(t->rcv_nxt - seq);
+			if (n >= dlen)
+				dlen = 0;
+			else {
+				data += n; dlen -= n; seq = t->rcv_nxt;
+			}
+		}
+		wend = t->rcv_nxt + tcp_wnd(t);
+		if (dlen > 0 && (long)(seq - wend) < 0) {
+			if ((long)(seq + dlen - wend) > 0)
+				dlen = (int)(wend - seq);
+			tcp_take(t, seq, data, dlen);
 		}
 	}
-	if (dlen || (flags & TF_FIN))
-		tcp_send(t, 0, t->snd_nxt, (unsigned char *)0, 0);
+	if ((flags & TF_FIN) && !t->peerfin) {
+		t->finpend = 1;
+		t->finseq = get32(th + 4) + (tot - hl - doff);
+	}
+	if (t->finpend && t->rcv_nxt == t->finseq)
+		tcp_peerfin(t);
+	if (tot - hl - doff > 0 || (flags & TF_FIN))
+		tcp_ack(t);
 }
 
 static void tcp_close_req(int job2, unsigned char *p, int abort)
@@ -1218,8 +1430,7 @@ static void tcp_close_req(int job2, unsigned char *p, int abort)
 
 static int tcp_tick()                   /* move data, timers; 1 if anything happened */
 {
-	int i, n, busy = 0;
-	unsigned char *sb;
+	int i, n, busy = 0, inflight, unsent, len, wasfull;
 	struct tcb *t;
 	long now = time((long *)0);
 
@@ -1247,54 +1458,75 @@ static int tcp_tick()                   /* move data, timers; 1 if anything happ
 			}
 			continue;
 		}
-		if (t->state == T_TIMEW) {
-			if (now - t->since >= 2) {
-				if (t->peerfin && !t->eofsent && t->rlen == 0)
-					tcp_event(t, TE_EOF);
-				tcp_event(t, TE_CLOSED);
-				tcp_free(t);
-			}
-			continue;
-		}
 		/* what arrived: into the PK as the program makes room */
 		if (t->ready && t->rlen > 0) {
-			n = dwr(tcb_chan[i], (char *)t->rbufw, t->rlen, 1);
+			n = dwr(tcb_chan[i], (char *)RBUF(t), t->rlen, 1);
 			if (n > 0) {
-				int wasfull = t->rlen == SEG;
-				memmove(t->rbufw, (unsigned char *)t->rbufw + n, t->rlen - n);
+				int keep = t->rlen;     /* move in-order and parked data down */
+				int j;
+				for (j = 0; j < t->nooo; j++)
+					if (t->rlen + (int)(t->ooe[j] - t->rcv_nxt) > keep)
+						keep = t->rlen + (int)(t->ooe[j] - t->rcv_nxt);
+				wasfull = tcp_wnd(t) < (unsigned)t->pmss;
+				memmove(RBUF(t), RBUF(t) + n, keep - n);
 				t->rlen -= n;
 				busy = 1;
-				if (wasfull)                    /* window update */
-					tcp_send(t, 0, t->snd_nxt, (unsigned char *)0, 0);
+				if (wasfull && tcp_wnd(t) >= (unsigned)t->pmss)
+					tcp_ack(t);             /* window update */
 			}
 		}
 		if (t->ready && t->peerfin && t->rlen == 0 && !t->eofsent) {
 			t->eofsent = 1;
 			tcp_event(t, TE_EOF);
 		}
-		/* what the program wrote: out of the PK, one segment at a time */
-		sb = (unsigned char *)t->sbufw;
-		if (t->ready && t->slen == 0 && !t->finsent &&
-		    (t->state == T_ESTAB || t->state == T_CLOSEW) && t->snd_wnd > 0) {
-			n = drd(tcb_chan[i], (char *)sb, t->snd_wnd < SEG ? t->snd_wnd : SEG, 0);
-			if (n > 0) {
-				t->slen = n;
-				tcp_send(t, TF_PSH, t->snd_una, sb, n);
-				t->snd_nxt = t->snd_una + n;
-				t->sent = now;
-				busy = 1;
-			} else if (t->closereq) {               /* all sent: FIN */
-				t->finsent = 1;
-				tcp_send(t, TF_FIN, t->snd_nxt, (unsigned char *)0, 0);
-				t->snd_nxt++;
-				t->sent = now;
-				t->state = t->state == T_ESTAB ? T_FINW1 : T_LASTAK;
+		if (t->state == T_TIMEW) {
+			if (now - t->since >= 2 && t->rlen == 0) {
+				if (t->peerfin && !t->eofsent)
+					tcp_event(t, TE_EOF);
+				tcp_event(t, TE_CLOSED);
+				tcp_free(t);
+			}
+			continue;
+		}
+		/* what the program wrote: from the PK into sbuf, then segments */
+		if (t->ready && !t->finsent && (t->state == T_ESTAB || t->state == T_CLOSEW)) {
+			if (t->slen < SWIN) {
+				len = SWIN - t->slen < (int)sizeof pkbufw ? SWIN - t->slen : (int)sizeof pkbufw;
+				n = drd(tcb_chan[i], (char *)pkbufw, len, 0);
+				if (n > 0) {
+					memcpy(SBUF(t) + t->slen, pkbufw, n);
+					t->slen += n;
+					busy = 1;
+				} else if (t->closereq && t->slen == 0) {      /* all sent and acked: FIN */
+					t->finsent = 1;
+					t->finseq = t->snd_nxt;
+					tcp_send(t, TF_FIN, t->snd_nxt, (unsigned char *)0, 0);
+					t->snd_nxt++;
+					t->sent = now;
+					t->state = t->state == T_ESTAB ? T_FINW1 : T_LASTAK;
+					busy = 1;
+				}
+			}
+			for (;;) {
+				inflight = (int)(t->snd_nxt - t->snd_una);
+				unsent = t->slen - inflight;
+				if (unsent <= 0 || inflight >= (int)t->snd_wnd)
+					break;
+				len = unsent;
+				if (len > (int)t->pmss)
+					len = t->pmss;
+				if (len > (int)t->snd_wnd - inflight)
+					len = t->snd_wnd - inflight;
+				if (inflight == 0)
+					t->sent = now;          /* the timer starts with the first */
+				tcp_send(t, TF_PSH, t->snd_nxt, SBUF(t) + inflight, len);
+				t->snd_nxt += len;
 				busy = 1;
 			}
 		}
 		/* retransmit: SYN, data or FIN not yet acknowledged */
-		if ((t->state == T_SYNSNT || t->state == T_SYNRCV || t->slen > 0 ||
-		     (t->finsent && t->snd_una != t->snd_nxt)) && now - t->sent >= t->rto) {
+		if ((t->state == T_SYNSNT || t->state == T_SYNRCV || t->snd_una != t->snd_nxt) &&
+		    now - t->sent >= t->rto) {
 			if (++t->tries > TRY_MAX) {
 				if (t->state == T_SYNSNT)
 					tcp_conreply(t->job2, TS_TIMEOUT, t);
@@ -1304,12 +1536,7 @@ static int tcp_tick()                   /* move data, timers; 1 if anything happ
 				tcp_free(t);
 				continue;
 			}
-			if (t->state == T_SYNSNT || t->state == T_SYNRCV)
-				tcp_send(t, TF_SYN, t->iss, (unsigned char *)0, 0);
-			else if (t->slen > 0)
-				tcp_send(t, TF_PSH, t->snd_una, sb, t->slen);
-			else
-				tcp_send(t, TF_FIN, t->snd_nxt - 1, (unsigned char *)0, 0);
+			tcp_resend(t);
 			t->sent = now;
 			if (t->rto < RTO_MAX)
 				t->rto *= 2;

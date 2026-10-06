@@ -124,8 +124,12 @@ int tcpred(int h, char *buf, int size)
 {
 	int n = drd(CH0 + h, buf, size, 8192);
 
-	if (n > 0)
+	if (n > 0) {
+		/* we made room in KBn:'s input: wake TCPIPD to fill it (a read
+		 * that does not wait is no "state change" that would wake it) */
+		request(TM_TGO, (unsigned char *)0, 0, h);
 		return n;
+	}
 	poll((unsigned char *)0);
 	if (hs[h].reset)
 		return -2;

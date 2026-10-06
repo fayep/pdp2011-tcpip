@@ -4,6 +4,7 @@
  *
  *	NC address port         connect
  *	NC -L port              wait for one connection
+ *	NC -S file address port send a file, then close (like nc < file)
  *
  * Lines typed are sent as typed (ending CR LF); what arrives is shown.
  * CTRL/Z sends end-of-file (FIN); the program ends when the other side
@@ -16,7 +17,7 @@
 #include "tcpmsg.h"
 #include "tcplib.h"
 
-static unsigned bw[128], lw[64];
+static unsigned bw[128], lw[64], fw[256];
 #define buf ((char *)bw)
 #define line ((char *)lw)
 
@@ -49,8 +50,14 @@ int main(int argc, char **argv)
 	unsigned char ip[4];
 	int h, n, listen = 0, sentfin = 0, idle;
 	unsigned port;
-	char in[80], *a1, *a2;
+	char in[80], *a1, *a2, *file = 0;
+	unsigned blk = 0, nblk = 0;
 
+	if (argc > 4 && (argv[1][1] == 'S' || argv[1][1] == 's') && argv[1][0] == '-') {
+		file = argv[2];
+		argv += 2;
+		argc -= 2;
+	}
 	if (argc > 2) {
 		a1 = argv[1];
 		a2 = argv[2];
@@ -69,6 +76,10 @@ int main(int argc, char **argv)
 	port = (unsigned)atol(a2);
 	if (!listen && !parse_ip(a1, ip)) {
 		printf("?NC: give the address as a.b.c.d (names need DNS, not yet)\n");
+		return 1;
+	}
+	if (file && fopn(file, 10, &nblk) != 0) {
+		printf("?NC: cannot open %s\n", file);
 		return 1;
 	}
 	if (tcpopn() != 0) {
@@ -102,7 +113,20 @@ int main(int argc, char **argv)
 			tcpabt(h);
 			return 1;
 		}
-		if (!sentfin) {
+		if (file && !sentfin) {                         /* the next block of the file */
+			n = ++blk <= nblk ? fblk(10, (char *)fw, blk) : 0;
+			if (n > 0 && blk == nblk)
+				while (n > 0 && ((char *)fw)[n - 1] == 0)
+					n--;            /* the NUL padding of the last block */
+			if (n > 0)
+				tcpwrt(h, (char *)fw, n);
+			else {
+				fcls(10);
+				tcpfin(h);
+				sentfin = 1;
+			}
+			idle = 0;
+		} else if (!sentfin) {
 			n = drd(0, line, sizeof lw - 2, 8192);  /* a typed line, if any */
 			if (n > 0) {
 				if (line[n - 1] == '\r')       /* the line ends CR: send CR LF */
