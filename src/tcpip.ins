@@ -1,0 +1,14 @@
+$! TCPIP.INS - start TCP/IP for RSTS/E (TFTP server with ARP, ping, DHCP).
+$! Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0:
+$! free for non-commercial use with attribution (see LICENSE).
+$! Call it from the system start-up file:   $ @SY:[0,91]TCPIP.INS
+$! Settings are in TCPIP$:TCPIP.INI; TFTP files live in FTP$:.
+$ _SET NOON
+$ _ASSIGN/SYSTEM/REPLACE SY:[0,91] TCPIP$
+$ _ASSIGN/SYSTEM/REPLACE SY:[0,90] FTP$
+$ _IF F$SEARCH("TCPIP$:TFTPD.TSK") .EQS. "" THEN _GOTO NONE
+$ _RUN TCPIP$:TFTPD
+$ _EXIT
+$NONE:
+$ _WRITE 0 "TCPIP.INS: TCPIP$:TFTPD.TSK not found; TCP/IP not started"
+$ _EXIT

@@ -1,0 +1,25 @@
+RSTS/E TCP/IP V0.1 - release notes
+Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0: free for
+non-commercial use with attribution.
+https://creativecommons.org/licenses/by-nc/4.0/
+
+A small IP stack for RSTS/E V10.1 that runs as an ordinary detached job on
+the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA). No monitor changes.
+
+  - TFTP server (RFC 1350): read and write, 512-byte blocks, files in FTP$:
+  - ARP and ping (ICMP echo)
+  - DHCP client: address, mask, router and lease from your network; the
+    host name sent is the DECnet node name (or HOSTNAME)
+  - Coexists with DECnet/E: start DECnet first and give its node address
+    (DECNET area.node name) in TCPIP$:TCPIP.INI
+
+Files (TCPIP$: = SY:[0,91]):
+  TFTPD.TSK   the server          TCPIP.INS  start-up file
+  TCPIP.INI   settings            *.C *.H *.MAC  sources
+
+Start at boot: add  $ @SY:[0,91]TCPIP.INS  to [0,1]START.COM.
+Use: tftp <address>, then get/put; file names are plain RSTS names
+(e.g. HELLO.C); files read back are padded with NULs to a 512-byte block.
+
+Known limits: one transfer at a time; no IP fragments; TFTP options
+(RFC 2347) are not supported; netascii is sent as stored (CR LF).

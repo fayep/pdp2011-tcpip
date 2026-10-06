@@ -1,0 +1,20 @@
+RSTS/E TCP/IP
+Copyright (c) 2026 Faye Salwin
+
+Licensed under the Creative Commons Attribution-NonCommercial 4.0
+International License (CC BY-NC 4.0).
+
+You are free to share (copy and redistribute in any medium or format) and
+adapt (remix, transform, and build upon) this work, under these terms:
+
+  Attribution    You must give appropriate credit ("RSTS/E TCP/IP by Faye
+                 Salwin"), provide a link to the license, and indicate if
+                 changes were made.
+  NonCommercial  You may not use the material for commercial purposes.
+
+No warranty is given. Full legal text:
+  https://creativecommons.org/licenses/by-nc/4.0/legalcode
+
+Not covered by this license (DEC material, included for reference or because
+Auto-Install needs it): docs/autoin/*, and the AUTVER.BCK and AUT101.A
+savesets on the kit tape (RSTS/E Auto-Install, Digital Equipment Corporation).

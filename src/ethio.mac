@@ -1,0 +1,242 @@
+	.TITLE	ETHIO	RSTS/E Ethernet portal access for PDP-11 C
+	.IDENT	/V01.00/
+;
+; Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0:
+; free for non-commercial use with attribution (see LICENSE).
+;
+; Thin layer between C and the RSTS/E Ethernet portal interface
+; (RSTS/E V10 Programming Manual ch. 7; System Directives Manual 3.27.2;
+; driver 170070/xedvr.mac). Assemble with COMMON.MAC as a prefix:
+;	MAC> ETHIO,ETHIO=SY:[1,2]COMMON,ETHIO
+;
+; C calling convention (from CCC/MACRO output): arguments pushed right to
+; left, then one word reserved for the result, then CALL. On entry
+;	0(SP) return address, 2(SP) result, 4(SP) arg1, 6(SP) arg2 ...
+; Every routine saves and restores R0-R5.
+;
+;	int ethopn(int chan, int unit, int ptype, int nbuf)
+;		Open XEunit: on RSTS channel chan as an unpadded portal for
+;		protocol type ptype, given as the PDP-11 word of the type
+;		field (08-00 -> 0x0008, 08-06 -> 0x0608), with nbuf system
+;		receive buffers. Returns 0 or a RSTS error code.
+;	int ethcls(int chan)
+;	int ethmul(int chan, char *addrs, int count)
+;		Enable count (<= 5) multicast addresses (6 bytes each, wire
+;		order) on the portal, e.g. FF-FF-FF-FF-FF-FF for broadcasts.
+;		Returns 0 or a RSTS error code.
+;	int ethget(int chan, char *buf, int size, int wait)
+;		Read one frame (dst, src, type, data) into buf. wait != 0
+;		stalls until one arrives. Returns the byte count, or minus a
+;		RSTS error code (-5: nothing waiting, -13: frames were lost).
+;	int ethput(int chan, char *buf, int len)
+;		Send buf (dst filled in; src and type are filled in by the
+;		driver), 60 <= len <= 1514. Returns 0 or minus an error code.
+;	int ethslp(int seconds)		(returns 0; must not be declared void:
+;		PDP-11 C reserves the result word only for non-void calls)
+;		.SLEEP. The driver ends the sleep early when a frame arrives
+;		for one of the job's portals (IOFIN4 clears JS.XE!JSTIM), so
+;		"poll every portal without stalling, then sleep" waits on all
+;		of them at once, with a timeout.
+;	int ethdet(void)
+;		Detach this job from its terminal (.UUO UU.DET, closing the
+;		terminal channels). Returns 0 or a RSTS error code.
+;	A buffer at an odd address is refused with error ODDBUF (ethget and
+;	ethput return -ODDBUF): the XE driver uses .READ/.WRITE buffers as
+;	given, and an odd one crashes the monitor (odd-address trap in kernel
+;	mode). PDP-11 C does not word-align char arrays.
+;	unsigned rpeek(unsigned addr)
+;		.PEEK: one word of monitor memory (needs RDMEM).
+;	int uutbl(int fn, char *buf)
+;		.UUO subfunction fn (UU.TB1 = -3, UU.TB2 = -12: monitor
+;		tables); copies the returned FIRQB (32 bytes) to buf.
+;		Returns 0 or a RSTS error code.
+
+ETHHND	= 50		; Ethernet device handler index (XRBLKM)
+ODDBUF	= 377		; our error code: buffer at an odd address
+SAVSIZ	= 14		; R0-R5 saved on entry: 6 words
+RESULT	= SAVSIZ+2	; offsets once the registers are saved
+ARG1	= SAVSIZ+4
+ARG2	= SAVSIZ+6
+ARG3	= SAVSIZ+10
+ARG4	= SAVSIZ+12
+
+	.PSECT	ETHIO,RO,I,GBL,REL,CON
+
+	.MACRO	SAVE
+	MOV	R0,-(SP)
+	MOV	R1,-(SP)
+	MOV	R2,-(SP)
+	MOV	R3,-(SP)
+	MOV	R4,-(SP)
+	MOV	R5,-(SP)
+	.ENDM
+	.MACRO	RESTOR
+	MOV	(SP)+,R5
+	MOV	(SP)+,R4
+	MOV	(SP)+,R3
+	MOV	(SP)+,R2
+	MOV	(SP)+,R1
+	MOV	(SP)+,R0
+	.ENDM
+
+; clear the FIRQB (R0, R1 used)
+CLRFQ:	MOV	#FIRQB,R0
+	MOV	#FQBSIZ/2,R1
+10$:	CLR	(R0)+
+	SOB	R1,10$
+	RETURN
+
+; clear the XRB (R0, R1 used)
+CLRXRB:	MOV	#XRB,R0
+	MOV	#XRBSIZ/2,R1
+10$:	CLR	(R0)+
+	SOB	R1,10$
+	RETURN
+
+; R0 := error byte from the FIRQB, as a positive word
+ERRCOD:	MOVB	@#FIRQB,R0
+	BIC	#177400,R0
+	RETURN
+
+ETHOPN::
+	SAVE
+	CALL	CLRFQ
+	MOVB	#OPNFQ,@#FIRQB+FQFUN
+	MOV	ARG1(SP),R0
+	ASL	R0
+	MOVB	R0,@#FIRQB+FQFIL	; channel * 2
+	MOV	#"XE,@#FIRQB+FQDEV
+	MOVB	ARG2(SP),@#FIRQB+FQDEVN
+	MOVB	#377,@#FIRQB+FQDEVN+1	; unit number is real
+	MOV	#100200,@#FIRQB+FQMODE	; mode given (bit 15) + 128: unpadded
+	MOV	ARG4(SP),@#FIRQB+FQCLUS	; system receive buffers
+	MOV	ARG3(SP),@#FIRQB+FQNENT	; protocol type
+	CALFIP
+	CALL	ERRCOD
+	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+ETHCLS::
+	SAVE
+	CALL	CLRFQ
+	MOVB	#CLSFQ,@#FIRQB+FQFUN
+	MOV	ARG1(SP),R0
+	ASL	R0
+	MOVB	R0,@#FIRQB+FQFIL
+	CALFIP
+	CALL	ERRCOD
+	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+ETHMUL::
+	SAVE
+	MOV	#ODDBUF,RESULT(SP)
+	BIT	#1,ARG2(SP)		; odd buffer: refuse it
+	BNE	90$
+	CALL	CLRXRB
+	MOV	#-3,@#XRB+XRLEN		; enable multicast addresses
+	MOV	ARG3(SP),R0
+	MUL	#6,R0			; R1 := count * 6
+	MOV	R1,@#XRB+XRBC
+	MOV	ARG2(SP),@#XRB+XRLOC
+	MOV	ARG1(SP),R0
+	ASL	R0
+	MOVB	R0,@#XRB+XRCI
+	MOVB	#ETHHND,@#XRB+XRBLKM
+	.SPEC
+	CALL	ERRCOD
+	MOV	R0,RESULT(SP)
+90$:	RESTOR
+	RETURN
+
+ETHGET::
+	SAVE
+	MOV	#-ODDBUF,RESULT(SP)
+	BIT	#1,ARG2(SP)		; odd buffer: refuse it
+	BNE	30$
+	CALL	CLRXRB
+	MOV	ARG3(SP),@#XRB+XRLEN
+	MOV	ARG2(SP),@#XRB+XRLOC
+	MOV	ARG1(SP),R0
+	ASL	R0
+	MOVB	R0,@#XRB+XRCI
+	TST	ARG4(SP)
+	BEQ	10$
+	MOV	#20000,@#XRB+XRMOD	; RECORD 8192: stall until a frame arrives
+10$:	.READ
+	CALL	ERRCOD
+	TST	R0
+	BNE	20$
+	MOV	@#XRB+XRBC,RESULT(SP)	; bytes read
+	BR	30$
+20$:	NEG	R0
+	MOV	R0,RESULT(SP)
+30$:	RESTOR
+	RETURN
+
+ETHPUT::
+	SAVE
+	MOV	#-ODDBUF,RESULT(SP)
+	BIT	#1,ARG2(SP)		; odd buffer: refuse it
+	BNE	90$
+	CALL	CLRXRB
+	MOV	ARG3(SP),@#XRB+XRLEN
+	MOV	ARG3(SP),@#XRB+XRBC
+	MOV	ARG2(SP),@#XRB+XRLOC
+	MOV	ARG1(SP),R0
+	ASL	R0
+	MOVB	R0,@#XRB+XRCI
+	.WRITE
+	CALL	ERRCOD
+	NEG	R0
+	MOV	R0,RESULT(SP)
+90$:	RESTOR
+	RETURN
+
+ETHSLP::
+	SAVE
+	CALL	CLRXRB
+	MOV	ARG1(SP),@#XRB		; seconds
+	.SLEEP
+	CLR	RESULT(SP)
+	RESTOR
+	RETURN
+
+ETHDET::
+	SAVE
+	CALL	CLRFQ
+	MOVB	#UU.DET,@#FIRQB+FQFUN
+	MOVB	#200,@#FIRQB+FQFIL	; this job; close the terminal channels
+	.UUO
+	CALL	ERRCOD
+	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+RPEEK::
+	SAVE
+	CALL	CLRXRB
+	MOV	ARG1(SP),@#XRB		; monitor virtual address
+	.PEEK
+	MOV	@#XRB,RESULT(SP)	; the word
+	RESTOR
+	RETURN
+
+UUTBL::
+	SAVE
+	CALL	CLRFQ
+	MOVB	ARG1(SP),@#FIRQB+FQFUN
+	.UUO
+	MOV	#FIRQB,R0
+	MOV	ARG2(SP),R1
+	MOV	#FQBSIZ/2,R2
+10$:	MOV	(R0)+,(R1)+
+	SOB	R2,10$
+	CALL	ERRCOD
+	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+	.END
