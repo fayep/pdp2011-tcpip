@@ -295,10 +295,56 @@ static void set_length(char *name, long len)
 	fatw(name, w, 7);
 }
 
+/* The C runtime takes arguments from the RSX command buffer: 80
+ * characters, cut with "-" - too short for many URLs. A CCL command's
+ * whole line (up to 127) is in core common; split it ourselves when it is
+ * ours. As DCL does, unquoted words come uppercased (we lowercase them) and
+ * "quoted" ones keep their case, so a URL with capitals must be quoted. */
+static char ccline[130], *ccargv[24];
+
+static int fullargs(int *argcp, char ***argvp)
+{
+	char *p, *q;
+	int n = 0;
+
+	if (*argcp < 2 || getcc(ccline) <= 0)
+		return 0;
+	for (p = ccline; *p && n < 23; ) {
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (!*p)
+			break;
+		if (*p == '"') {                        /* "quoted": case kept */
+			ccargv[n++] = q = ++p;
+			while (*p && *p != '"')
+				*q++ = *p++;
+			if (*p)
+				p++;
+			*q = 0;
+			if (*p == ' ')
+				p++;
+			continue;
+		}
+		ccargv[n++] = p;
+		for (; *p && *p != ' ' && *p != '\t'; p++)
+			*p = lower(*p);
+		if (*p)
+			*p++ = 0;
+	}
+	ccargv[n] = 0;
+	if (n < 2 || !prefix(ccargv[0], (*argvp)[0]))
+		return 0;               /* not our command line: keep the runtime's */
+	*argcp = n;
+	*argvp = ccargv;
+	return 1;
+}
+
 int main(int argc, char **argv)
 {
 	int i, st, redirs = 0, xgiven = 0;
 	char line[200], *u = 0;
+
+	fullargs(&argc, &argv);
 
 	for (i = 1; i < argc; i++) {
 		if (argv[i][0] == '-' && argv[i][1]) {

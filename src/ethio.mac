@@ -670,6 +670,29 @@ KBSET::
 	RESTOR
 	RETURN
 
+; int getcc(char *buf)  - RSTS core common (low memory 460: a count byte,
+; then up to 127 bytes), where a CCL command leaves its whole line, into
+; buf with a NUL; its length, or 0. The C runtime gets its arguments from
+; the RSX command buffer, which holds only 80 characters.
+CORCMN	= 460
+GETCC::
+	SAVE
+	MOV	ARG1(SP),R1
+	CLR	RESULT(SP)
+	MOVB	@#CORCMN,R2		; length
+	BIC	#177400,R2
+	BEQ	30$
+	CMP	R2,#127.
+	BLOS	10$
+	MOV	#127.,R2
+10$:	MOV	R2,RESULT(SP)
+	MOV	#CORCMN+1,R0
+20$:	MOVB	(R0)+,(R1)+
+	SOB	R2,20$
+30$:	CLRB	(R1)
+	RESTOR
+	RETURN
+
 RPEEK::
 	SAVE
 	CALL	CLRXRB
