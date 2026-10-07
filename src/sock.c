@@ -18,7 +18,9 @@
 #include "tcpmsg.h"
 #include "sock.h"
 
-#define CH0   3                 /* KB channels: CH0 + TCP handle (0..3) */
+#define CH0   12                /* KB channels: CH0 + TCP handle (0..3); clear of
+				   C stdio (low channels), 10 (programs' block
+				   I/O) and 11 (file attributes, fatr/fatw) */
 #define TH_N  4                 /* TCP handles (TCPIPD's connections) */
 #define CQ_N  4                 /* connection replies waiting */
 #define DQ_N  2                 /* datagrams waiting */

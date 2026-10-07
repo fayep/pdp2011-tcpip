@@ -27,6 +27,7 @@ int main(int argc, char **argv)
 	unsigned port;
 	char in[80], *a1, *a2, *file = 0;
 	unsigned blk = 0, nblk = 0;
+	long size = -1L, sent = 0;
 
 	if (argc > 4 && (argv[1][1] == 'S' || argv[1][1] == 's') && argv[1][0] == '-') {
 		file = argv[2];
@@ -59,6 +60,12 @@ int main(int argc, char **argv)
 			return 1;
 		}
 		memcpy(&sa.sin_addr, hp->h_addr, 4);
+	}
+	if (file) {                             /* the recorded length, if any */
+		int w[11];
+		long eof;
+		if (fatr(file, w) == 0 && (eof = (long)(unsigned)w[4] << 16 | (unsigned)w[5]) != 0)
+			size = (eof - 1) * 512 + (unsigned)w[6];
 	}
 	if (file && fopn(file, 10, &nblk) != 0) {
 		printf("?NC: cannot open %s\n", file);
@@ -106,9 +113,14 @@ int main(int argc, char **argv)
 		}
 		if (file && !sentfin) {                         /* the next block of the file */
 			n = ++blk <= nblk ? fblk(10, (char *)fw, blk) : 0;
-			if (n > 0 && blk == nblk)
+			if (size >= 0) {                /* stop at the recorded end */
+				if (sent + n > size)
+					n = size > sent ? (int)(size - sent) : 0;
+			} else if (n > 0 && blk == nblk)
 				while (n > 0 && ((char *)fw)[n - 1] == 0)
 					n--;            /* the NUL padding of the last block */
+			if (n > 0)
+				sent += n;
 			if (n > 0)
 				send(h, (char *)fw, n, 0);
 			else {
