@@ -820,7 +820,15 @@ static struct tcb *tcp_new(int job2)    /* a free TCB with its PK open */
 		return 0;
 	t = &tcb[i];
 	memset(t, 0, sizeof *t);
-	if ((kb = dopn("PK:", tcb_chan[i], 0)) < 0)
+	/* mode 16: a dynamic pseudo keyboard, a new one for each connection.
+	 * A plain "PK:" is the static PK0, and RSTS answers a second open of
+	 * a static PK that is already open with success, the same device and
+	 * no KB number (so two connections shared PK0 and the second one was
+	 * told KB0, the console). More than one dynamic PK per job needs
+	 * EXQTA, which TCPIPD has. +1 (PKDET): when we close the PK, RSTS
+	 * hangs up its KB and would otherwise kill the job that still has
+	 * that KB open - the program using the connection. */
+	if ((kb = dopn("PK0:", tcb_chan[i], 16 + 1)) <= 0)
 		return 0;
 	kbset(kb, 012, 0200);                   /* no XON/XOFF into the data */
 	t->kb = kb;
