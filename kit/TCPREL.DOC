@@ -1,44 +1,63 @@
-RSTS/E TCP/IP V0.2 - release notes
+RSTS/E TCP/IP V0.3 - release notes
 Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0: free for
 non-commercial use with attribution.
 https://creativecommons.org/licenses/by-nc/4.0/
 
 A small IP stack for RSTS/E V10.1 that runs as an ordinary detached job,
-TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA). No
-monitor changes.
+TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA).
 
-  - ARP (with a cache; requests for the next hop), ping replies
-  - PING command: PING a.b.c.d [count]  - replies with times, or "host
-    unreachable" / "network unreachable"; no privilege needed
-  - Routing by plain CIDR: hosts on our network (dst & mask) are reached
-    directly, anything else through the gateway (e.g. a /23 works)
-  - DHCP client: address, mask, router and lease from your network; the
-    host name sent is HOSTNAME, else the DECnet node name
-  - TFTP server (RFC 1350): read and write, files in FTP$:; TFTP NO in
-    TCPIP.INI turns it off. Exact lengths: a file written over TFTP gets
-    RMS attributes recording its true length, and a file with attributes
-    (TKB output, earlier TFTP writes) is sent up to that length
-  - Coexists with DECnet/E: start DECnet first and give its node address
-    (DECNET area.node name) in TCPIP$:TCPIP.INI
+  - TCP: connections over pseudo keyboards (a program reads and writes
+    KBn:), 4 KB receive window, out-of-order segments kept and reported
+    with SACK, several segments in flight, retransmission and fast
+    retransmit
+  - UDP for programs; DNS resolver (name servers from DHCP, or DNS and
+    DOMAIN in TCPIP.INI)
+  - ARP, ICMP echo, CIDR routing, DHCP client
+  - Commands:
+      PING host [count]
+      HOST name ...            addresses of names; HOST alone: settings
+      NC host port             a TCP connection on your terminal;
+      NC -L port               wait for one;  NC -S file host port  send a file
+      CURL [-i] [-I] [-L] [-s] [-v] [-k] [-x proxy] [-o file] url
+                               fetch http:// URLs; https:// through a proxy
+                               that does TLS (PROXY host:port in TCPIP.INI)
+  - TFTP server, now its own job TFTPD (TFTP NO turns it off); exact file
+    lengths kept in RMS attributes
+  - For C programmers: BSD-style sockets (SOCK.H; socket, bind, listen,
+    accept, connect, send, recv, sendto, recvfrom, gethostbyname, ...).
+    Link with  LINK/CC prog,TCPIP$:SOCK,TCPIP$:RESOLV,TCPIP$:ETHIO
+    (compile with the headers from TCPIP$:).
 
-Programs talk to TCPIPD with RSTS local messages (receiver "TCPIP "); see
-TCPMSG.H. PING is the first such client.
+Monitor fix (XEPATCH, default YES): the RSTS/E V10.1 DEUNA/DELUA driver
+crashes the system when it receives a frame of 629-632 bytes (the frame's
+CRC alone lands in the last of its 632-byte receive buffers and the driver
+copies a negative length). Real DEUNAs and SIMH both produce such frames.
+XEPAT reads this system's own monitor, checks the exact code, and writes an
+ONLPAT command file that makes the driver skip that copy; ONLPAT verifies
+every old word before it changes anything, so a monitor that differs is
+left alone. The fix goes into the monitor file and takes effect at the next
+boot. TCPIP.INS repeats the check at every start, so a monitor you build
+later gets the fix too; TCP/IP then waits for the reboot. XEPATCH NO turns
+this off (TCPIP$:XEPAT.NO).
+
+HTTPS: tools/sslproxy.py from the distribution runs on a nearby machine
+(e.g. the MiSTer's Linux) and fetches https:// URLs for CURL, checking the
+certificate; CURL shows what it reported (-v) and refuses an untrusted
+certificate unless -k is given.
 
 Files (TCPIP$: = SY:[0,91]):
-  TCPIPD.TSK  the TCP/IP job     PING.TSK   the ping client
-  TCPIP.INI   settings           TCPIP.INS  start-up file (also defines PING)
-  *.C *.H *.MAC  sources
+  TCPIPD.TSK  the TCP/IP job        TFTPD.TSK  the TFTP server
+  PING.TSK NC.TSK HOST.TSK CURL.TSK  commands
+  XEPAT.TSK   the monitor fix check TCPIP.INI  settings
+  TCPIP.INS   start-up file (defines the commands)
+  SOCK.H TCPMSG.H NETCFG.H SOCK.OBJ RESOLV.OBJ ETHIO.OBJ  for programs
+  *.C *.MAC  sources
 
 Start at boot: add  $ @SY:[0,91]TCPIP.INS  to [0,1]START.COM.
-TFTP use: tftp <address>, then get/put; file names are plain RSTS names
-(e.g. HELLO.C). A file without RMS attributes (made by CREATE, an editor or
-C stdio) has no recorded length: netascii drops the NUL padding of its last
-block, binary (octet) sends whole 512-byte blocks.
 
-Changes since V0.1: TFTPD is now TCPIPD, the general TCP/IP job; ARP
-requests and cache; CIDR next hop; local message receiver and the PING
-command; TFTP optional; TFTP keeps exact file lengths, can read files that
-carry RMS attributes (such as .TSK files) and replaces existing files.
+Changes since V0.2: TCP and NC; UDP and DNS for programs, HOST, CURL; the
+socket library; TFTP moved into its own job; the DEUNA receive crash fix.
 
-Known limits: one TFTP transfer at a time; no IP fragments; no TFTP
-options (RFC 2347); netascii is sent as stored (CR LF). No TCP yet.
+Known limits: no IP fragments; no TLS on RSTS itself (use the proxy);
+TCPIPD serves up to 4 TCP connections at a time; SIMH's NAT ignores the
+TCP MSS we advertise, so the monitor fix matters there too.

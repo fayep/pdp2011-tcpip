@@ -15,6 +15,7 @@ $! an upgrade from V0.1: its server and version marker are gone in V0.2
 $ _IF F$SEARCH("SY:[0,91]TFTPD.TSK") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TFTPD.TSK
 $ _IF F$SEARCH("SY:[0,91]TFTPD.C") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TFTPD.C
 $ _IF F$SEARCH("SY:[0,91]TCP010.DAT") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TCP010.DAT
+$ _IF F$SEARCH("SY:[0,91]TCP020.DAT") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TCP020.DAT
 $! The RSTS/E 10.1 DEUNA/DELUA driver crashes the system when a received
 $! frame of 629-632 bytes chains so that only its CRC lands in the last
 $! 632-byte buffer (XEREAD copies a length of 0..-3). XEPAT builds an ONLPAT
@@ -36,6 +37,7 @@ $DOXE:
 $ _IF F$SEARCH("AUTWRK$:XEPAT.CMD") .NES. "" THEN _DELETE/NOLOG AUTWRK$:XEPAT.CMD
 $ _DEFINE/COMMAND/SYSTEM/REPLACE XEPAT AUTWRK$:XEPAT.TSK
 $ _XEPAT AUTWRK$:XEPAT.CMD
+$ _DELETE/COMMAND/SYSTEM XEPAT
 $ _IF F$SEARCH("AUTWRK$:XEPAT.CMD") .EQS. "" THEN _GOTO NOXE
 $ _RUN $ONLPAT
 AUTWRK$:XEPAT.CMD
@@ -52,15 +54,15 @@ $ _GOTO DONE
 $NEWINI:
 $ _WRITE 0 "Settings are in TCPIP$:TCPIP.INI: the address comes from DHCP; set"
 $ _WRITE 0 "HOSTNAME there, or a fixed address (or DECNET, only if DECnet/E runs);"
-$ _WRITE 0 "TFTP NO turns the TFTP server off."
+$ _WRITE 0 "TFTP NO turns the TFTP server off; PROXY host:port lets CURL fetch https://."
 $DONE:
 $ _WRITE 0 " "
 $ _WRITE 0 "To start TCP/IP at every boot, add this line to your system start-up"
 $ _WRITE 0 "file ([0,1]START.COM) (after DECnet/E, if you run it):"
 $ _WRITE 0 "    $ @SY:[0,91]TCPIP.INS"
-$ _WRITE 0 "To start it now:  @SY:[0,91]TCPIP.INS   (it also defines the PING command)"
-$ _WRITE 0 "If an earlier version is running, reboot, or REMOVE its job (TFTPD or"
-$ _WRITE 0 "TCPIPD in SHOW JOB/ALL) and then run @SY:[0,91]TCPIP.INS."
+$ _WRITE 0 "To start it now:  @SY:[0,91]TCPIP.INS   (it also defines PING, NC, HOST, CURL)"
+$ _WRITE 0 "If an earlier version is running, reboot (needed anyway for the monitor"
+$ _WRITE 0 "fix), or REMOVE its jobs (TCPIPD, TFTPD) and run @SY:[0,91]TCPIP.INS."
 $ _WRITE 0 " "
 $ ISTAT$ == TRUE
 $ _EXIT
