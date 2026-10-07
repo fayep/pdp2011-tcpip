@@ -608,7 +608,14 @@ static void ping_tick()                 /* give up on unanswered ARP, forget old
 #define TCB_N    4
 #define RWIN     4096           /* receive window per connection */
 #define SWIN     2048           /* send buffer per connection */
-#define MSS_US   1460           /* the largest segment we take */
+#define MSS_US   574            /* the largest segment we take. NOT 1460: RSTS
+				   receives into 632-byte buffers and chains
+				   longer frames; when only CRC bytes land in
+				   the last buffer (frames of 629-631 bytes)
+				   XEDVR works out a negative length for it and
+				   the copy to us crashes the monitor (XEREAD's
+				   signed compare lets -1 through). 574 + 40 +
+				   14 = 628: a TCP frame to us never chains. */
 #define NOOO     4              /* parked out-of-order ranges */
 #define T_FREE   0
 #define T_LISTEN 1
@@ -922,8 +929,8 @@ static void tcp_options(struct tcb *t, unsigned char *o, int len, int syn)
 			break;
 		if (syn && k == 2 && l == 4) {
 			t->pmss = GET16(o + 2);
-			if (t->pmss > MSS_US)
-				t->pmss = MSS_US;
+			if (t->pmss > 1460)     /* sending big frames is fine */
+				t->pmss = 1460;
 			if (t->pmss < 64)
 				t->pmss = 64;
 		} else if (syn && k == 4 && l == 2)

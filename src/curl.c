@@ -2,16 +2,22 @@
  * free for non-commercial use with attribution (see LICENSE). */
 /* curl.c - fetch a URL over HTTP for RSTS/E.
  *
- *	CURL [-i] [-I] [-L] [-s] [-o file] url
+ *	CURL [-i] [-I] [-L] [-s] [-v] [-k] [-x proxy] [-o file] url
  *
  *	-o file   write the body to file (exact length, binary) instead of
  *	          the terminal
  *	-i        show the response headers too;  -I  ask for headers only
  *	-L        follow redirects (up to 5)
  *	-s        no progress or error chatter
+ *	-v        show how the proxy's TLS went (X-TLS-* headers)
+ *	-k        fetch even when the certificate does not check out
+ *	-x h:p    use this proxy (-x none: no proxy); else PROXY in TCPIP.INI
  *
- * url is [http://]host[:port][/path]. https:// needs TLS, which this
- * system has not got: use an HTTP server or a proxy that speaks HTTP.
+ * url is [http[s]://]host[:port][/path]. RSTS/E has no TLS, so https://
+ * goes through a proxy that has (tools/sslproxy.py, e.g. on the MiSTer):
+ * CURL sends it "GET https://..." in plain HTTP; it fetches over TLS,
+ * checks the certificate and reports in X-TLS-* headers. http:// goes
+ * through the proxy too when one is set.
  * The request is HTTP/1.0 (Connection: close), so the body ends when the
  * server closes and is never chunked.
  */
@@ -28,8 +34,11 @@ static unsigned bw[256], rqw[300];             /* even buffers */
 #define buf ((char *)bw)
 #define req ((char *)rqw)
 static char host[128], path[400], url[520], loc[520], hdr[600];
-static unsigned port;
-static int opt_i, opt_I, opt_L, opt_s;
+static unsigned port, pport;
+static int tls;                         /* https */
+static char proxy[80];                  /* proxy host; "" = none */
+static char verified[8], tlserr[120];
+static int opt_i, opt_I, opt_L, opt_s, opt_v, opt_k;
 static char *ofile;
 static FILE *of;
 static long total;
@@ -52,11 +61,12 @@ static int parse(char *u)               /* url -> host, port, path */
 	char *h, *e, *c;
 	int n;
 
-	if (prefix(u, "https://")) {
-		printf("?CURL: https needs TLS, which RSTS/E has not got; try http://\n");
+	tls = prefix(u, "https://");
+	if (tls && !proxy[0]) {
+		printf("?CURL: https needs a proxy that does TLS (PROXY in TCPIP.INI, or -x)\n");
 		return 0;
 	}
-	h = prefix(u, "http://") ? u + 7 : u;
+	h = tls ? u + 8 : prefix(u, "http://") ? u + 7 : u;
 	e = strchr(h, '/');
 	n = e ? e - h : strlen(h);
 	if (n < 1 || n >= (int)sizeof host) {
@@ -65,7 +75,7 @@ static int parse(char *u)               /* url -> host, port, path */
 	}
 	memcpy(host, h, n);
 	host[n] = 0;
-	port = 80;
+	port = tls ? 443 : 80;
 	if ((c = strchr(host, ':')) != 0) {
 		*c = 0;
 		port = (unsigned)atol(c + 1);
@@ -80,16 +90,18 @@ static void relocate(char *l)
 {
 	char *q;
 
+	char *sc = tls ? "https" : "http";
+
 	if (prefix(l, "http://") || prefix(l, "https://"))
 		strcpy(url, l);
 	else if (l[0] == '/' && l[1] == '/')
-		sprintf(url, "http:%s", l);
+		sprintf(url, "%s:%s", sc, l);
 	else if (l[0] == '/')
-		sprintf(url, "http://%s:%u%s", host, port, l);
+		sprintf(url, "%s://%s:%u%s", sc, host, port, l);
 	else {
 		if ((q = strrchr(path, '/')) != 0)
 			q[1] = 0;
-		sprintf(url, "http://%s:%u%s%s", host, port, path, l);
+		sprintf(url, "%s://%s:%u%s%s", sc, host, port, path, l);
 	}
 }
 
@@ -112,8 +124,11 @@ static int fetch()
 	int s, n, hl = 0, inhdr = 1, status = -1, i;
 	char *e, *line, *nl;
 
-	if ((h = gethostbyname(host)) == 0) {
-		printf("?CURL: %s: %s\n", host, hstrerror(h_errno));
+	char *to = proxy[0] ? proxy : host, target[160];
+	unsigned toport = proxy[0] ? pport : port;
+
+	if ((h = gethostbyname(to)) == 0) {
+		printf("?CURL: %s: %s\n", to, hstrerror(h_errno));
 		return -1;
 	}
 	if ((s = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
@@ -122,18 +137,29 @@ static int fetch()
 	}
 	memset(&sa, 0, sizeof sa);
 	sa.sin_family = AF_INET;
-	sa.sin_port = htons(port);
+	sa.sin_port = htons(toport);
 	memcpy(&sa.sin_addr, h->h_addr, 4);
-	if (!opt_s)
+	if (!opt_s && proxy[0])
+		printf("[connecting to proxy %s (%s) port %u for %s]\n", proxy,
+		       inet_ntoa(sa.sin_addr), pport, host);
+	else if (!opt_s)
 		printf("[connecting to %s (%s) port %u]\n", host, inet_ntoa(sa.sin_addr), port);
 	if (connect(s, (struct sockaddr *)&sa, sizeof sa) < 0) {
-		printf("?CURL: %s: %s\n", host, sostr(soerr));
+		printf("?CURL: %s: %s\n", to, sostr(soerr));
 		closesocket(s);
 		return -1;
 	}
-	sprintf(req, "%s %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: RSTS-curl/0.3\r\n"
-		"Accept: */*\r\nConnection: close\r\n\r\n",
-		opt_I ? "HEAD" : "GET", path, host);
+	if (proxy[0] && port != (tls ? 443 : 80))       /* proxies want the whole URL */
+		sprintf(target, "%s://%s:%u", tls ? "https" : "http", host, port);
+	else if (proxy[0])
+		sprintf(target, "%s://%s", tls ? "https" : "http", host);
+	else
+		target[0] = 0;
+	sprintf(req, "%s %s%s HTTP/1.0\r\nHost: %s\r\nUser-Agent: RSTS-curl/0.3\r\n"
+		"Accept: */*\r\n%sConnection: close\r\n\r\n",
+		opt_I ? "HEAD" : "GET", target, path, host,
+		opt_k ? "X-TLS-Insecure: 1\r\n" : "");
+	verified[0] = tlserr[0] = 0;
 	if (send(s, req, strlen(req), 0) < 0) {
 		printf("?CURL: %s\n", sostr(soerr));
 		closesocket(s);
@@ -158,6 +184,17 @@ static int fetch()
 				*nl = 0;
 			if (opt_i || opt_I)
 				printf("%s\n", line);
+			else if (opt_v && (prefix(line, "x-tls-") || prefix(line, "via:")))
+				printf("[%s]\n", line);
+			if (prefix(line, "x-tls-verified:")) {
+				for (e = line + 15; *e == ' '; e++)
+					;
+				strncpy(verified, e, sizeof verified - 1);
+			} else if (prefix(line, "x-tls-error:")) {
+				for (e = line + 12; *e == ' '; e++)
+					;
+				strncpy(tlserr, e, sizeof tlserr - 1);
+			}
 			if (status < 0) {
 				if (prefix(line, "http/") && (e = strchr(line, ' ')) != 0)
 					status = atoi(e + 1);
@@ -172,13 +209,55 @@ static int fetch()
 				inhdr = 0;              /* the blank line: body follows */
 			hl = 0;
 		}
+		if (!inhdr && status == 502 && verified[0] == 'n')
+			break;                  /* certificate refused: said below */
 		if (!inhdr && i < n)
 			body(buf + i, n - i);
 	}
 	if (n < 0 && !opt_s)
 		printf("\n?CURL: %s\n", sostr(soerr));
 	closesocket(s);
+	if (status == 502 && verified[0] == 'n')
+		printf("?CURL: %s: certificate not trusted (%s); -k fetches anyway\n",
+		       host, tlserr[0] ? tlserr : "no reason given");
+	else if (tls && verified[0] == 'n' && !opt_s)
+		printf("\n[warning: %s's certificate was not verified: %s]\n", host, tlserr);
+	else if (tls && !verified[0] && status > 0 && !opt_s)
+		printf("\n[warning: the proxy did not say whether the certificate checked out]\n");
 	return status;
+}
+
+/* PROXY host:port from TCPIP$:TCPIP.INI (unless -x said) */
+static void inproxy(char *v)
+{
+	char *c;
+
+	strncpy(proxy, v, sizeof proxy - 1);
+	proxy[sizeof proxy - 1] = 0;
+	pport = 3128;
+	if ((c = strchr(proxy, ':')) != 0) {
+		*c = 0;
+		pport = (unsigned)atol(c + 1);
+	}
+	if (prefix(proxy, "none"))
+		proxy[0] = 0;
+}
+
+static void readproxy()
+{
+	FILE *f = fopen("TCPIP$:TCPIP.INI", "r");
+	char l[120], k[20], v[80];
+
+	if (!f)
+		return;
+	while (fgets(l, sizeof l, f)) {
+		char *c = strchr(l, '!');
+		if (c)
+			*c = 0;
+		if (sscanf(l, "%19s %79s", k, v) == 2 && prefix(k, "proxy") && !k[5])
+			inproxy(v);
+	}
+	fclose(f);
 }
 
 /* RMS attributes for a file of len bytes, so RSTS knows its exact length */
@@ -197,7 +276,7 @@ static void set_length(char *name, long len)
 
 int main(int argc, char **argv)
 {
-	int i, st, redirs = 0;
+	int i, st, redirs = 0, xgiven = 0;
 	char line[200], *u = 0;
 
 	for (i = 1; i < argc; i++) {
@@ -208,6 +287,14 @@ int main(int argc, char **argv)
 				break;
 			case 'l': opt_L = 1; break;
 			case 's': opt_s = 1; break;
+			case 'v': opt_v = 1; break;
+			case 'k': opt_k = 1; break;
+			case 'x':
+				if (++i < argc) {
+					inproxy(argv[i]);
+					xgiven = 1;
+				}
+				break;
 			case 'o':
 				if (++i < argc)
 					ofile = argv[i];
@@ -224,6 +311,8 @@ int main(int argc, char **argv)
 		if (!fgets(line, sizeof line, stdin) || !(u = strtok(line, " \t\r\n")))
 			return 1;
 	}
+	if (!xgiven)
+		readproxy();
 	strncpy(url, u, sizeof url - 1);
 	if (ofile) {
 		fdel(ofile);            /* stdio cannot open a file with attributes */
