@@ -11,6 +11,30 @@ $ _DEFINE/COMMAND/SYSTEM/REPLACE PING TCPIP$:PING.TSK
 $ _DEFINE/COMMAND/SYSTEM/REPLACE NC TCPIP$:NC.TSK
 $ _DEFINE/COMMAND/SYSTEM/REPLACE HOST TCPIP$:HOST.TSK
 $ _DEFINE/COMMAND/SYSTEM/REPLACE CURL TCPIP$:CURL.TSK
+$!
+$! The RSTS/E 10.1 DEUNA/DELUA driver crashes the system on received frames
+$! of 629-632 bytes. XEPAT checks the installed monitor and, when it lacks
+$! the fix (a monitor built since TCP/IP was installed), ONLPAT puts it into
+$! the monitor file. The running monitor keeps the bug until a reboot, so
+$! TCP/IP waits for that; the system logical XEPND$ marks "reboot pending"
+$! and, like every system logical, is gone after the reboot.
+$! TCPIP$:XEPAT.NO (installed with XEPATCH NO) turns all of this off.
+$ _IF F$PARSE("XEPND$:",,"DEVICE") .NES. "XEPND$:" THEN _GOTO PENDING
+$ _IF F$SEARCH("TCPIP$:XEPAT.NO") .NES. "" THEN _GOTO START
+$ _IF F$SEARCH("TCPIP$:XEPAT.TSK") .EQS. "" THEN _GOTO START
+$ _IF F$SEARCH("TCPIP$:XEPAT.CMD") .NES. "" THEN _DELETE/NOLOG TCPIP$:XEPAT.CMD
+$ _DEFINE/COMMAND/SYSTEM/REPLACE XEPAT TCPIP$:XEPAT.TSK
+$ _XEPAT -Q TCPIP$:XEPAT.CMD
+$ _IF F$SEARCH("TCPIP$:XEPAT.CMD") .EQS. "" THEN _GOTO START
+$ _RUN $ONLPAT
+TCPIP$:XEPAT.CMD
+$ _DELETE/NOLOG TCPIP$:XEPAT.CMD
+$ _ASSIGN/SYSTEM/REPLACE SY:[0,91] XEPND$
+$PENDING:
+$ _WRITE 0 "TCPIP.INS: the monitor file has the DEUNA receive fix, but the running"
+$ _WRITE 0 "monitor does not until the system is rebooted; TCP/IP will start then."
+$ _EXIT
+$START:
 $ _RUN TCPIP$:TCPIPD
 $ _IF F$SEARCH("TCPIP$:TFTPD.TSK") .NES. "" THEN _RUN TCPIP$:TFTPD
 $ _EXIT

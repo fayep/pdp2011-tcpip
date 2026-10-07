@@ -20,18 +20,29 @@ $! frame of 629-632 bytes chains so that only its CRC lands in the last
 $! 632-byte buffer (XEREAD copies a length of 0..-3). XEPAT builds an ONLPAT
 $! command file from this system's own monitor, which skips that copy; ONLPAT
 $! checks every old word before it writes. Effective from the next boot.
+$! TCPIP.INS repeats the check at every start, so a monitor built later
+$! gets the fix too; XEPATCH NO leaves TCPIP$:XEPAT.NO to turn that off.
 $ XEP = "Y"
 $ _IF F$TYPE(XEPA$$) .NES. "" THEN XEP = F$LEFT(XEPA$$, 1)
-$ _IF XEP .NES. "Y" THEN _GOTO NOXE
+$ _IF F$SEARCH("SY:[0,91]XEPAT.NO") .NES. "" THEN _DELETE/NOLOG SY:[0,91]XEPAT.NO
+$ _IF XEP .EQS. "Y" THEN _GOTO DOXE
+$ _OPEN/WRITE 1 AUTWRK$:XEPAT.NO
+$ _WRITE 1 "XEPATCH NO at installation: TCPIP.INS leaves the monitor alone."
+$ _CLOSE 1
+$ _WRITE 0 "Not fixing the DEUNA receive crash (XEPATCH NO). A received frame of"
+$ _WRITE 0 "629-632 bytes can crash this system while TCP/IP runs."
+$ _GOTO NOXE
+$DOXE:
 $ _IF F$SEARCH("AUTWRK$:XEPAT.CMD") .NES. "" THEN _DELETE/NOLOG AUTWRK$:XEPAT.CMD
-$ _DEFINE/COMMAND/REPLACE XEPAT AUTWRK$:XEPAT.TSK
+$ _DEFINE/COMMAND/SYSTEM/REPLACE XEPAT AUTWRK$:XEPAT.TSK
 $ _XEPAT AUTWRK$:XEPAT.CMD
 $ _IF F$SEARCH("AUTWRK$:XEPAT.CMD") .EQS. "" THEN _GOTO NOXE
 $ _RUN $ONLPAT
 AUTWRK$:XEPAT.CMD
 $ _DELETE/NOLOG AUTWRK$:XEPAT.CMD
+$ _ASSIGN/SYSTEM/REPLACE SY:[0,91] XEPND$
 $ _WRITE 0 "The DEUNA receive fix is in the monitor file; it takes effect at the"
-$ _WRITE 0 "next boot. Until then, avoid running TCP/IP on a busy network."
+$ _WRITE 0 "next boot, and TCP/IP will not start until then."
 $NOXE:
 $! keep the settings of an earlier installation
 $ _IF F$SEARCH("SY:[0,91]TCPIP.INI") .EQS. "" THEN _GOTO NEWINI

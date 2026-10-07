@@ -3,7 +3,8 @@
 /* xepat.c - make the ONLPAT command file that fixes the RSTS/E 10.1 XE
  * (DEUNA/DELUA) driver crash on received frames of 629-632 bytes.
  *
- *	XEPAT [file [sil]]      default TCPIP$:XEPAT.CMD, the installed SIL
+ *	XEPAT [-Q] [file [sil]] default TCPIP$:XEPAT.CMD, the installed SIL;
+ *	                        -Q: say nothing when the fix is already there
  *
  * Exit status: 0 = command file written (run ONLPAT on it, then reboot),
  * 1 = already patched, 2 = not this driver / cannot tell (nothing done).
@@ -141,13 +142,22 @@ static int patched(unsigned i)          /* our patch already there? */
 
 int main(int argc, char **argv)
 {
-	char sil[40], *out = argc > 1 ? argv[1] : "TCPIP$:XEPAT.CMD";
+	char sil[40], *out;
 	unsigned i, at = 0, nw[22], beq, target, s;
-	int norig = 0, npat = 0, k, d;
+	int norig = 0, npat = 0, k, d, quiet = 0;
 	FILE *f;
 
+	if (argc > 1 && argv[1][0] == '-' && (argv[1][1] == 'q' || argv[1][1] == 'Q')) {
+		quiet = 1;
+		argc--;
+		argv++;
+	}
+	out = argc > 1 ? argv[1] : "TCPIP$:XEPAT.CMD";
 	if (argc > 2)
+	{
 		strncpy(sil, argv[2], sizeof sil - 1);
+		sil[sizeof sil - 1] = 0;
+	}
 	if ((argc <= 2 && silname(sil) < 0) || getuna(sil) < 0) {
 		printf("xepat: cannot read the installed monitor (privilege?); nothing done\n");
 		return 2;
@@ -157,7 +167,8 @@ int main(int argc, char **argv)
 		if (patched(i)) npat++;
 	}
 	if (npat == 1 && norig == 0) {
-		printf("xepat: %s: the XE receive fix is already installed\n", sil);
+		if (!quiet)
+			printf("xepat: %s: the XE receive fix is already installed\n", sil);
 		return 1;
 	}
 	if (norig != 1) {
