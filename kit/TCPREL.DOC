@@ -16,8 +16,10 @@ TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA).
   - Commands:
       PING host [count]
       HOST name ...            addresses of names; HOST alone: settings
-      NC host port             a TCP connection on your terminal;
-      NC -L port               wait for one;  NC -S file host port  send a file
+      NC [-i file] [-o file] [-t|-b] host port    a TCP connection on your
+      NC [-i file] [-o file] [-t|-b] -L port      terminal (or wait for one);
+                               -i sends a file, -o saves what arrives (text
+                               or binary as for CURL) - RSTS has no pipes
       CURL [-i] [-I] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
                                fetch http:// URLs; https:// through a proxy
                                that does TLS (PROXY host:port in TCPIP.INI)
