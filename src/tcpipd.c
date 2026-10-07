@@ -1093,6 +1093,9 @@ static void tcp_input(unsigned char *ip, int hl, int tot)
 	seq = get32(th + 4);
 	ack = get32(th + 8);
 	wnd = GET16(th + 14);
+	if (wnd > 32767)
+		wnd = 32767;    /* the send loop compares it as an int (16 bits):
+				   a Mac's 65535 read as -1 and nothing was sent */
 	for (i = 0; i < TCB_N; i++)
 		if (tcb[i].state > T_LISTEN && tcb[i].lport == dport && tcb[i].rport == sport &&
 		    memcmp(tcb[i].rip, ip + 12, 4) == 0)
