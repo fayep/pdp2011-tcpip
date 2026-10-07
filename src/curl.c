@@ -2,10 +2,13 @@
  * free for non-commercial use with attribution (see LICENSE). */
 /* curl.c - fetch a URL over HTTP for RSTS/E.
  *
- *	CURL [-i] [-I] [-L] [-s] [-v] [-k] [-x proxy] [-o file] url
+ *	CURL [-i] [-I] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
  *
- *	-o file   write the body to file (exact length, binary) instead of
- *	          the terminal
+ *	-o file   write the body to file instead of the terminal: a text/...
+ *	          response as an RSTS text file (CR LF, no attributes), anything
+ *	          else as binary (undefined records, exact length in RMS
+ *	          attributes)
+ *	-t / -b   with -o: treat the body as text / binary whatever its type
  *	-i        show the response headers too;  -I  ask for headers only
  *	-L        follow redirects (up to 5)
  *	-s        no progress or error chatter
@@ -38,7 +41,9 @@ static unsigned port, pport;
 static int tls;                         /* https */
 static char proxy[80];                  /* proxy host; "" = none */
 static char verified[8], tlserr[120];
-static int opt_i, opt_I, opt_L, opt_s, opt_v, opt_k;
+static int opt_i, opt_I, opt_L, opt_s, opt_v, opt_k, opt_t, opt_b;
+static int ctext;                       /* this response is text/... */
+static int prevcr;                      /* text: last byte written was CR */
 static char *ofile;
 static FILE *of;
 static long total;
@@ -109,7 +114,15 @@ static void body(char *p, int n)
 {
 	if (n <= 0 || opt_I)
 		return;
-	if (of)
+	if (of && (opt_t || (ctext && !opt_b))) {      /* text: LF -> CR LF */
+		int i;
+		for (i = 0; i < n; i++) {
+			if (p[i] == '\n' && !prevcr)
+				putc('\r', of);
+			putc(p[i], of);
+			prevcr = p[i] == '\r';
+		}
+	} else if (of)
 		fwrite(p, 1, n, of);
 	else
 		fwrite(p, 1, n, stdout);
@@ -166,6 +179,8 @@ static int fetch()
 		return -1;
 	}
 	loc[0] = 0;
+	ctext = 0;
+	prevcr = 0;
 	sotmo(s, 60);
 	while ((n = recv(s, buf, sizeof bw, 0)) > 0) {
 		if (!inhdr) {
@@ -200,6 +215,10 @@ static int fetch()
 					status = atoi(e + 1);
 				else
 					status = 0;
+			} else if (prefix(line, "content-type:")) {
+				for (e = line + 13; *e == ' ' || *e == '\t'; e++)
+					;
+				ctext = prefix(e, "text/");
 			} else if (prefix(line, "location:")) {
 				for (e = line + 9; *e == ' ' || *e == '\t'; e++)
 					;
@@ -260,14 +279,16 @@ static void readproxy()
 	fclose(f);
 }
 
-/* RMS attributes for a file of len bytes, so RSTS knows its exact length */
+/* RMS attributes for a binary file of len bytes: undefined record format
+ * (a byte stream, nothing for RMS to pad), highest block, end-of-file block
+ * and first free byte - the exact end */
 static void set_length(char *name, long len)
 {
 	int w[7];
 	long blocks = (len + SEG - 1) / SEG, eof = len / SEG + 1;
 
-	w[0] = 1;
-	w[1] = SEG;
+	w[0] = 0;                       /* undefined record format */
+	w[1] = 0;
 	w[2] = (int)(blocks >> 16); w[3] = (int)blocks;
 	w[4] = (int)(eof >> 16);    w[5] = (int)eof;
 	w[6] = (int)(len % SEG);
@@ -289,6 +310,8 @@ int main(int argc, char **argv)
 			case 's': opt_s = 1; break;
 			case 'v': opt_v = 1; break;
 			case 'k': opt_k = 1; break;
+			case 't': opt_t = 1; break;
+			case 'b': opt_b = 1; break;
 			case 'x':
 				if (++i < argc) {
 					inproxy(argv[i]);
@@ -341,10 +364,13 @@ int main(int argc, char **argv)
 		break;
 	}
 	if (of) {
+		int text = opt_t || (ctext && !opt_b);
 		fclose(of);
-		set_length(ofile, total);
+		if (!text)
+			set_length(ofile, total);
 		if (!opt_s)
-			printf("[%ld bytes written to %s]\n", total, ofile);
+			printf("[%ld bytes written to %s as %s]\n", total, ofile,
+			       text ? "text" : "binary");
 	} else if (!opt_I)
 		fflush(stdout);
 	if (st >= 300 && st < 400 && loc[0] && !opt_L && !opt_s)

@@ -11,12 +11,13 @@
  * One transfer at a time; a second client gets "busy". netascii is sent as
  * stored: RSTS text files already end their lines with CR LF.
  *
- * Exact file lengths: a file written by TFTP gets RMS attributes (fixed
- * 512-byte records, end-of-file block and first free byte, as the task
- * builder writes them), so RSTS knows its true length. A file read is sent
- * up to the end its attributes record; one without attributes (C stdio and
- * CREATE write none) is sent in whole blocks, except that netascii drops the
- * NUL padding of the last block.
+ * Writes: netascii becomes an ordinary RSTS text file (CR LF lines, no
+ * attributes; netascii's CR NUL goes back to CR). octet gets RMS attributes
+ * of undefined record format (a byte stream) with its end-of-file block and
+ * first free byte, so RSTS knows the exact length.
+ * Reads: a file is sent up to the end its attributes record; one without
+ * attributes (text, C stdio and CREATE write none) is sent in whole blocks,
+ * except that netascii drops the NUL padding of the last block.
  */
 #include <stdio.h>
 #include <string.h>
@@ -47,6 +48,7 @@ static struct {
 	unsigned block;                 /* last block sent (RRQ) or acked (WRQ) */
 	int len;                        /* bytes in obuf for a retransmit */
 	int text;                       /* netascii */
+	int prevcr;                     /* netascii write: last byte was CR */
 	long size;                      /* RRQ: exact length from attributes; -1 unknown */
 	char name[24];                  /* FTP$:NAME, for the attributes */
 	int last;                       /* RRQ: last block was short */
@@ -163,15 +165,15 @@ static char *ftpname(unsigned char *p, int n, char *buf)
 	return buf;
 }
 
-/* RMS attributes for a file of len bytes: fixed 512-byte records, highest
- * block, end-of-file block and first free byte (as TKB writes them) */
+/* RMS attributes for a binary file of len bytes: undefined record format
+ * (a byte stream), highest block, end-of-file block and first free byte */
 static void set_length(char *name, long len)
 {
 	int w[7];
 	long blocks = (len + SEG - 1) / SEG, eof = len / SEG + 1;
 
-	w[0] = 1;                               /* fixed-length records */
-	w[1] = SEG;
+	w[0] = 0;                               /* undefined record format */
+	w[1] = 0;
 	w[2] = (int)(blocks >> 16); w[3] = (int)blocks;
 	w[4] = (int)(eof >> 16);    w[5] = (int)eof;
 	w[6] = (int)(len % SEG);
@@ -240,6 +242,7 @@ static void tftp_request(struct sockaddr_in *from, unsigned char *t, int tlen)
 	xf.done = 0;
 	xf.block = 0;
 	xf.bytes = 0;
+	xf.prevcr = 0;
 	if (op == 1)
 		rrq_next();
 	else
@@ -274,7 +277,19 @@ static void tftp_transfer(unsigned char *t, int tlen)
 		}
 		if (blk != xf.block + 1)
 			return;
-		if (tlen > 4 && fwrite(t + 4, 1, tlen - 4, xf.f) != tlen - 4) {
+		if (xf.text) {                  /* netascii: CR NUL -> CR */
+			int i, bad = 0;
+			for (i = 4; i < tlen; i++) {
+				if (!(t[i] == 0 && xf.prevcr) && putc(t[i], xf.f) == EOF)
+					bad = 1;
+				xf.prevcr = t[i] == '\r';
+			}
+			if (bad) {
+				tftp_error(sx, &xf.peer, 3, "disk full or write error");
+				xf_end();
+				return;
+			}
+		} else if (tlen > 4 && fwrite(t + 4, 1, tlen - 4, xf.f) != tlen - 4) {
 			tftp_error(sx, &xf.peer, 3, "disk full or write error");
 			xf_end();
 			return;
@@ -286,7 +301,8 @@ static void tftp_transfer(unsigned char *t, int tlen)
 			fclose(xf.f);
 			xf.f = 0;
 			xf.done = 1;
-			set_length(xf.name, xf.bytes);
+			if (!xf.text)
+				set_length(xf.name, xf.bytes);
 		}
 	}
 }

@@ -18,11 +18,16 @@ TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA).
       HOST name ...            addresses of names; HOST alone: settings
       NC host port             a TCP connection on your terminal;
       NC -L port               wait for one;  NC -S file host port  send a file
-      CURL [-i] [-I] [-L] [-s] [-v] [-k] [-x proxy] [-o file] url
+      CURL [-i] [-I] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
                                fetch http:// URLs; https:// through a proxy
                                that does TLS (PROXY host:port in TCPIP.INI)
-  - TFTP server, now its own job TFTPD (TFTP NO turns it off); exact file
-    lengths kept in RMS attributes
+  - TFTP server, now its own job TFTPD (TFTP NO turns it off)
+  - Files received (CURL -o, TFTP put): text (a text/... response, CURL -t,
+    TFTP netascii) becomes an ordinary RSTS text file - CR LF lines, no
+    attributes - that editors and compilers read; anything else is binary,
+    stored with RMS attributes of undefined record format and its exact
+    end (end-of-file block and first free byte). Files are sent (TFTP get,
+    NC -S) up to that recorded end
   - For C programmers: BSD-style sockets (SOCK.H; socket, bind, listen,
     accept, connect, send, recv, sendto, recvfrom, gethostbyname, ...).
     Link with  LINK/CC prog,TCPIP$:SOCK,TCPIP$:RESOLV,TCPIP$:ETHIO

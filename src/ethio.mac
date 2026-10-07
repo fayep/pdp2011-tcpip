@@ -435,8 +435,10 @@ FATR::
 	SOB	R2,10$
 	CLR	R0
 	MOV	ARG2(SP),R1
-	TST	(R1)			; no attributes: first word 0
-	BNE	70$
+	MOV	#11.,R2			; no attributes: all 11 words 0 (not
+20$:	TST	(R1)+			; just the first: undefined record
+	BNE	70$			; format has record type 0)
+	SOB	R2,20$
 	INC	R0
 70$:	MOV	R0,-(SP)
 	CALL	ATRCLS

@@ -228,6 +228,7 @@ static unsigned char *next_hop(unsigned char *dst)
 static void ping_arp_done(unsigned char *ip);
 static void tcp_arp_done(void);
 static void udp_arp_done(void);
+static int alive(int job2);
 
 static void arp_input(int n)
 {
@@ -892,6 +893,10 @@ static void tcp_listen(int job2, unsigned char *p)
 
 	for (i = 0; i < TCB_N; i++)
 		if (tcb[i].state == T_LISTEN && tcb[i].lport == port) {
+			if (!alive(tcb[i].job2)) {      /* its owner has gone */
+				tcp_free(&tcb[i]);
+				continue;
+			}
 			tcp_lsnreply(job2, TS_BUSY, port);
 			return;
 		}
@@ -1406,6 +1411,15 @@ static void udp_reply_bind(int job2, int status, int u, unsigned port)
 	msgsnd((char *)0, job2, (char *)msgp, (char *)msgdw, 0);
 }
 
+/* is the program behind job2 still there? A job that ended (or was
+ * removed) has no receiver: the send fails with 5 */
+static int alive(int job2)
+{
+	memset(msgp, 0, 20);
+	msgp[0] = TM_ALIVE;
+	return msgsnd((char *)0, job2, (char *)msgp, (char *)msgdw, 0) != 5;
+}
+
 static int udp_port_free(unsigned port)
 {
 	int i;
@@ -1413,8 +1427,11 @@ static int udp_port_free(unsigned port)
 	if (port == 68)
 		return 0;                       /* our DHCP client */
 	for (i = 0; i < UDS_N; i++)
-		if (uds[i].job2 && uds[i].lport == port)
-			return 0;
+		if (uds[i].job2 && uds[i].lport == port) {
+			if (alive(uds[i].job2))
+				return 0;
+			uds[i].job2 = 0;        /* its owner has gone */
+		}
 	return 1;
 }
 
