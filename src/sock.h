@@ -52,6 +52,31 @@ struct sockaddr {
 #define SE_MSGSIZE     14
 #define SE_IO          15       /* RSTS error on the connection's KB */
 
+struct soinf {                  /* TCPIPD's settings (soinfo) */
+	unsigned char ip[4], mask[4], gw[4];
+	unsigned char dns[2][4];        /* name servers; 0.0.0.0 = none */
+	char domain[33];                /* for short names */
+	char host[33];                  /* our host name */
+};
+
+/* gethostbyname: as BSD; h_errno says why it gave 0 */
+struct hostent {
+	char *h_name;                   /* the canonical name */
+	char **h_aliases;
+	int h_addrtype;                 /* AF_INET */
+	int h_length;                   /* 4 */
+	char **h_addr_list;             /* addresses, network order, 0-ended */
+};
+#define h_addr h_addr_list[0]
+#define HOST_NOT_FOUND 1
+#define TRY_AGAIN      2                /* no answer from the name servers */
+#define NO_RECOVERY    3                /* no name server set, or bad replies */
+#define NO_DATA        4                /* the name exists but has no address */
+extern int h_errno;
+extern struct hostent *gethostbyname(char *name);
+extern char *hstrerror(int e);
+extern int soinfo(struct soinf *inf);   /* 0, or -1 (soerr: SE_NOTRUN) */
+
 extern int soerr;
 extern char *sostr(int e);
 

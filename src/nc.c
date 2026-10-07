@@ -2,7 +2,7 @@
  * free for non-commercial use with attribution (see LICENSE). */
 /* nc.c - netcat for RSTS/E: a TCP connection to the terminal.
  *
- *	NC address port         connect
+ *	NC host port            connect (a name, or an address a.b.c.d)
  *	NC -L port              wait for one connection
  *	NC -S file address port send a file, then close (like nc < file)
  *
@@ -52,9 +52,13 @@ int main(int argc, char **argv)
 	memset(&sa, 0, sizeof sa);
 	sa.sin_family = AF_INET;
 	sa.sin_port = htons(port);
-	if (!lsn && (sa.sin_addr.s_addr = inet_addr(a1)) == INADDR_NONE) {
-		printf("?NC: give the address as a.b.c.d (names need DNS, not yet)\n");
-		return 1;
+	if (!lsn) {
+		struct hostent *hp = gethostbyname(a1);
+		if (!hp) {
+			printf("?NC: %s: %s\n", a1, hstrerror(h_errno));
+			return 1;
+		}
+		memcpy(&sa.sin_addr, hp->h_addr, 4);
 	}
 	if (file && fopn(file, 10, &nblk) != 0) {
 		printf("?NC: cannot open %s\n", file);

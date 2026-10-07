@@ -58,5 +58,9 @@
 #define UDP_MAX   521           /* the largest datagram a socket carries */
 #define TM_TUNL   10            /* stop listening: p[6..7] local port */
 /* TM_TCONR also carries p[10..11] = the local port (for accept) */
+#define TM_INFO   11            /* our settings, please */
+#define TM_INFOR  0x89          /* p[1] status, p[2..5] address, p[6..9] mask,
+				   p[10..13] gateway; data: name servers (2 x 4,
+				   0.0.0.0 = none), domain (33), host name (33) */
 #define TM_TLSNR  0x83          /* p[1] status, p[6..7] the port */
 /* TM_TCONR p[12] = 1 for a connection that arrived on a listening port */

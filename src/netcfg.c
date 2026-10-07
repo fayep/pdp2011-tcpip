@@ -34,6 +34,9 @@ unsigned char cfgmac[6], cfgip[4], cfgmsk[4], cfggw[4];
 int cfgdhc, cfgdet, cfgunt, cfgini, cfgtft;
 char cfghst[33] = "RSTS";       /* host name sent to DHCP */
 char cfgwhy[100];
+unsigned char cfgdns[8];
+int cfgndn, cfgdng;
+char cfgdom[33];
 
 static int dn_node;             /* DECnet area*1024+node, 0 if not given */
 static int mac_given;
@@ -158,6 +161,16 @@ int cfgld()
 				strncpy(cfghst, val, 32);
 				cfghst[32] = 0;
 				hgiven = 1;
+			} else if (!strcmp(key, "DNS")) {
+				if (!parse_ip(val, cfgdns))
+					goto bad;
+				cfgndn = 1;
+				if (name[0] && parse_ip(name, cfgdns + 4))
+					cfgndn = 2;
+				cfgdng = 1;
+			} else if (!strcmp(key, "DOMAIN")) {
+				strncpy(cfgdom, val, 32);
+				cfgdom[32] = 0;
 			} else if (!strcmp(key, "TFTP")) {
 				cfgtft = val[0] == 'Y' || val[0] == 'y';
 			} else if (!strcmp(key, "UNIT")) {

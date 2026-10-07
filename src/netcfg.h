@@ -18,6 +18,9 @@ extern int cfgdhc, cfgdet, cfgunt, cfgini;  /* cfgini: TCPIP.INI was read */
 extern int cfgtft;                       /* run the TFTP server (TFTP YES|NO) */
 extern char cfgwhy[];
 extern char cfghst[];            /* host name for DHCP */
+extern unsigned char cfgdns[8];  /* up to two name servers (DNS a [b]) */
+extern int cfgndn, cfgdng;       /* how many; given in TCPIP.INI (DHCP keeps off) */
+extern char cfgdom[];            /* DNS domain for short names (DOMAIN) */
 extern int cfgld(void);
 extern int hwmac(int unit, unsigned char *mac);
 #define PT_IP    0x0008        /* 08-00 as the PDP-11 word of the type field */

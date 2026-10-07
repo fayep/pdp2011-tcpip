@@ -2,7 +2,7 @@
  * free for non-commercial use with attribution (see LICENSE). */
 /* ping.c - send ICMP echo requests through the TCPIPD job.
  *
- *	PING address [count]
+ *	PING host [count]               (a name, or an address a.b.c.d)
  *
  * The program declares a receiver with a blank name (no privilege needed),
  * asks TCPIPD for each echo with a local message and waits for its answer;
@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include "netcfg.h"
 #include "tcpmsg.h"
+#include "sock.h"
 
 #define WAIT_SEC 3              /* per echo */
 #define HZ 60                   /* ticks per second */
@@ -27,17 +28,6 @@ static long now_ticks()         /* ticks since midnight */
 
 	tickd(w);
 	return ((1440L - w[0]) * 60L + (60 - w[1])) * HZ + (HZ - w[2]);
-}
-
-static int parse_ip(char *s, unsigned char *ip)
-{
-	int a, b, c, d;
-
-	if (sscanf(s, "%d.%d.%d.%d", &a, &b, &c, &d) != 4 ||
-	    (a | b | c | d) < 0 || a > 255 || b > 255 || c > 255 || d > 255)
-		return 0;
-	ip[0] = a; ip[1] = b; ip[2] = c; ip[3] = d;
-	return 1;
 }
 
 static char *why(int status)
@@ -72,9 +62,15 @@ int main(int argc, char **argv)
 	}
 	if (cnt && (count = atoi(cnt)) < 1)
 		count = 1;
-	if (!parse_ip(host, ip)) {
-		printf("?PING: give an address as a.b.c.d (names need DNS, not yet)\n");
-		return 1;
+	{
+		struct hostent *h = gethostbyname(host);
+		if (!h) {
+			printf("?PING: %s: %s\n", host, hstrerror(h_errno));
+			return 1;
+		}
+		memcpy(ip, h->h_addr, 4);
+		if (inet_addr(host) == INADDR_NONE)
+			printf("%s is %d.%d.%d.%d\n", h->h_name, ip[0], ip[1], ip[2], ip[3]);
 	}
 	msgrem();
 	if ((e = msgdcl("      ", 4)) != 0) {

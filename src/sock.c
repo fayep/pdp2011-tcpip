@@ -50,7 +50,8 @@ static struct dq {
 	unsigned bw[(UDP_MAX + 1) / 2];
 } dq[DQ_N];
 static int ndq;
-static int lsnst = -1, bndst = -1, bndu;
+static int lsnst = -1, bndst = -1, bndu, infst = -1;
+static struct soinf info;
 static unsigned bndport;
 static int declared;
 static unsigned pw[10], dw[256], bw[256];       /* even buffers for RSTS */
@@ -88,6 +89,16 @@ static void poll()                      /* sort what TCPIPD has sent */
 			break;
 		case TM_TLSNR:
 			lsnst = p[1];
+			break;
+		case TM_INFOR:
+			memcpy(info.ip, p + 2, 4);
+			memcpy(info.mask, p + 6, 4);
+			memcpy(info.gw, p + 10, 4);
+			memcpy(info.dns, dw, 8);
+			memcpy(info.domain, (char *)dw + 8, 33);
+			memcpy(info.host, (char *)dw + 41, 33);
+			info.domain[32] = info.host[32] = 0;
+			infst = p[1];
 			break;
 		case TM_UBNDR:
 			bndst = p[1];
@@ -192,6 +203,7 @@ static int cq_ready()
 }
 static int lsn_ready() { return lsnst >= 0; }
 static int bnd_ready() { return bndst >= 0; }
+static int inf_ready() { return infst >= 0; }
 static int dq_ready()
 {
 	int i;
@@ -260,14 +272,8 @@ static void cq_drop(int i)
 	ncq--;
 }
 
-int socket(int domain, int type, int protocol)
+static int declare()
 {
-	int s;
-
-	if (domain != AF_INET || (type != SOCK_STREAM && type != SOCK_DGRAM)) {
-		soerr = SE_INVAL;
-		return -1;
-	}
 	if (!declared) {
 		msgrem();
 		if (msgdcl("      ", 16) != 0) {
@@ -276,6 +282,33 @@ int socket(int domain, int type, int protocol)
 		}
 		declared = 1;
 	}
+	return 0;
+}
+
+int soinfo(struct soinf *inf)
+{
+	if (declare() < 0)
+		return -1;
+	poll();
+	infst = -1;
+	if (request(TM_INFO, 0, (unsigned char *)0, 0) < 0)
+		return -1;
+	if (!await((struct sk *)0, inf_ready, 10L))
+		return -1;
+	*inf = info;
+	return 0;
+}
+
+int socket(int domain, int type, int protocol)
+{
+	int s;
+
+	if (domain != AF_INET || (type != SOCK_STREAM && type != SOCK_DGRAM)) {
+		soerr = SE_INVAL;
+		return -1;
+	}
+	if (declare() < 0)
+		return -1;
 	for (s = 0; s < SO_MAX; s++)
 		if (!sk[s].type)
 			break;

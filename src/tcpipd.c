@@ -339,8 +339,8 @@ static void dhsend(int type)    /* 1 DISCOVER, 3 REQUEST */
 		o = dhopt(o, 54, 4, dhsrv);             /* server identifier */
 	}
 	o = dhopt(o, 12, strlen(cfghst), (unsigned char *)cfghst);  /* host name */
-	v[0] = 1; v[1] = 3; v[2] = 51; v[3] = 58;
-	o = dhopt(o, 55, 4, v);                         /* mask, router, lease, T1 */
+	v[0] = 1; v[1] = 3; v[2] = 6; v[3] = 15; v[4] = 51; v[5] = 58;
+	o = dhopt(o, 55, 6, v);         /* mask, router, DNS, domain, lease, T1 */
 	*o++ = 255;
 	n = o - b;
 	if (n < 300)
@@ -355,7 +355,8 @@ static void dhsend(int type)    /* 1 DISCOVER, 3 REQUEST */
 static void dhinput(unsigned char *b, int n)
 {
 	unsigned char *o, *end, type = 0, srv[4], mask[4], gw[4];
-	int hmask = 0, hgw = 0, hsrv = 0;
+	unsigned char dns[8], dom[33];
+	int hmask = 0, hgw = 0, hsrv = 0, ndns = 0, hdom = 0;
 	long lease = 0, t1 = 0;
 
 	if (n < 241 || b[0] != 2 || memcmp(b + 28, mymac, 6) != 0 || get32(b + 4) != dhxid ||
@@ -374,6 +375,15 @@ static void dhinput(unsigned char *b, int n)
 		if (o[0] == 3 && o[1] >= 4) { memcpy(gw, o + 2, 4); hgw = 1; }
 		if (o[0] == 51 && o[1] == 4) lease = get32(o + 2);
 		if (o[0] == 58 && o[1] == 4) t1 = get32(o + 2);
+		if (o[0] == 6 && o[1] >= 4) {
+			ndns = o[1] >= 8 ? 2 : 1;
+			memcpy(dns, o + 2, 4 * ndns);
+		}
+		if (o[0] == 15 && o[1] > 0 && o[1] <= 32) {
+			memcpy(dom, o + 2, o[1]);
+			dom[o[1]] = 0;
+			hdom = 1;
+		}
 		o += 2 + o[1];
 	}
 	if (!hsrv) {                    /* no server identifier (SLiRP): the sender */
@@ -392,6 +402,13 @@ static void dhinput(unsigned char *b, int n)
 		if (hmask) memcpy(cfgmsk, mask, 4);
 		if (hgw) memcpy(cfggw, gw, 4);
 		if (hsrv) memcpy(dhsrv, srv, 4);
+		if (ndns && !cfgdng) {
+			memset(cfgdns, 0, 8);
+			memcpy(cfgdns, dns, 4 * ndns);
+			cfgndn = ndns;
+		}
+		if (hdom && !cfgdom[0])
+			strcpy(cfgdom, (char *)dom);
 		memcpy(dhsmac, pkt + 6, 6);
 		dhleas = lease > 0 ? lease : 3600L;
 		dht1 = t1 > 0 && t1 < dhleas ? t1 : dhleas / 2;
@@ -400,6 +417,9 @@ static void dhinput(unsigned char *b, int n)
 			printf("tcpipd: DHCP: %d.%d.%d.%d mask %d.%d.%d.%d router %d.%d.%d.%d lease %ld s\n",
 			       myip[0], myip[1], myip[2], myip[3], cfgmsk[0], cfgmsk[1], cfgmsk[2], cfgmsk[3],
 			       cfggw[0], cfggw[1], cfggw[2], cfggw[3], dhleas);
+		if (dhst != DH_RENEW && attached && cfgndn)
+			printf("tcpipd: DNS %d.%d.%d.%d%s%s\n", cfgdns[0], cfgdns[1], cfgdns[2],
+			       cfgdns[3], cfgdom[0] ? ", domain " : "", cfgdom);
 		dhst = DH_BOUND;
 	} else if ((dhst == DH_REQ || dhst == DH_RENEW) && type == 6) {   /* NAK */
 		memset(myip, 0, 4);
@@ -1523,7 +1543,20 @@ static int msg_input()                  /* serve queued requests; 1 if any */
 			tcp_close_req(job2, msgp, 0);
 		else if (msgp[0] == TM_TABT)
 			tcp_close_req(job2, msgp, 1);
-		else if (msgp[0] == TM_TUNL) {
+		else if (msgp[0] == TM_INFO) {
+			unsigned char *d = (unsigned char *)msgdw;
+			memset(msgp, 0, 20);
+			msgp[0] = TM_INFOR;
+			msgp[1] = ipup() ? TS_OK : TS_DOWN;
+			memcpy(msgp + 2, myip, 4);
+			memcpy(msgp + 6, cfgmsk, 4);
+			memcpy(msgp + 10, cfggw, 4);
+			memset(d, 0, 74);
+			memcpy(d, cfgdns, 8);
+			strcpy((char *)d + 8, cfgdom);
+			strcpy((char *)d + 41, cfghst);
+			msgsnd((char *)0, job2, (char *)msgp, (char *)msgdw, 74);
+		} else if (msgp[0] == TM_TUNL) {
 			int i;
 			for (i = 0; i < TCB_N; i++)
 				if (tcb[i].state == T_LISTEN && tcb[i].job2 == job2 &&
