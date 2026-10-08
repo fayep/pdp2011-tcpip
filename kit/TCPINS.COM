@@ -5,7 +5,7 @@ $! Runs from AUTWRK$:, which holds the kit files; Auto-Install then copies
 $! them to the final area SY:[0,91] (TCPIP$:).
 $ _SET NOON
 $ ISTAT$ == FALSE
-$ _WRITE 0 "Installing RSTS/E TCP/IP V0.4"
+$ _WRITE 0 "Installing RSTS/E TCP/IP V1.00"
 $ _WRITE 0 " "
 $! FTP$: holds the files TFTP serves and receives
 $ _CREATE/ACCOUNT/NOUSER/NOLOG SY:[0,90]
@@ -17,6 +17,7 @@ $ _IF F$SEARCH("SY:[0,91]TFTPD.C") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TFTPD.C
 $ _IF F$SEARCH("SY:[0,91]TCP010.DAT") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TCP010.DAT
 $ _IF F$SEARCH("SY:[0,91]TCP020.DAT") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TCP020.DAT
 $ _IF F$SEARCH("SY:[0,91]TCP030.DAT") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TCP030.DAT
+$ _IF F$SEARCH("SY:[0,91]TCP040.DAT") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TCP040.DAT
 $! The RSTS/E 10.1 DEUNA/DELUA driver crashes the system when a received
 $! frame of 629-632 bytes chains so that only its CRC lands in the last
 $! 632-byte buffer (XEREAD copies a length of 0..-3). XEPAT builds an ONLPAT

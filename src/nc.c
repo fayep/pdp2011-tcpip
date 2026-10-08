@@ -4,6 +4,8 @@
  *
  *	NC [-i file] [-o file] [-t|-b] host port        connect
  *	NC [-i file] [-o file] [-t|-b] -L port          wait for one connection
+ *	NC/INPUT=file/OUTPUT=file/TEXT|/BINARY host port, NC/LISTEN=port ...
+ *	                                                (the same, RSTS style)
  *
  *	-i file   send the file, then end-of-file (FIN) - like nc < file
  *	          (-S is the same). Sent up to its recorded length; a text file
@@ -97,6 +99,7 @@ static void set_length(char *name, long len)
 static int usage()
 {
 	printf("?NC: NC [-i file] [-o file] [-t|-b] host port, or ... -L port\n");
+	printf("     (or /INPUT=file /OUTPUT=file /TEXT /BINARY /LISTEN=port)\n");
 	return 1;
 }
 
@@ -123,6 +126,28 @@ int main(int argc, char **argv)
 		argv = pa;
 	}
 	for (i = 1; i < argc; i++) {
+		if (argv[i][0] == '/') {                /* RSTS-style qualifiers */
+			char *v = 0;
+			if ((cmdqal(argv[i], "INPUT", 3, &v) || cmdqal(argv[i], "SEND", 3, &v) ||
+			     cmdqal(argv[i], "OUTPUT", 3, &v) || cmdqal(argv[i], "LISTEN", 3, &v)) && !v) {
+				printf("?NC: %s needs a value (%s=...)\n", argv[i], argv[i]);
+				return 1;
+			}
+			if (cmdqal(argv[i], "INPUT", 3, &v) || cmdqal(argv[i], "SEND", 3, &v))
+				ifile = v;
+			else if (cmdqal(argv[i], "OUTPUT", 3, &v))
+				ofile = v;
+			else if (cmdqal(argv[i], "TEXT", 2, &v))
+				force = 1;
+			else if (cmdqal(argv[i], "BINARY", 2, &v))
+				force = 0;
+			else if (cmdqal(argv[i], "LISTEN", 3, &v) && na < 2) {
+				lsn = 1;
+				a[na++] = v;
+			} else
+				return usage();
+			continue;
+		}
 		if (argv[i][0] == '-' && argv[i][1] && !argv[i][2]) {
 			switch (lower(argv[i][1])) {
 			case 'l': lsn = 1; break;

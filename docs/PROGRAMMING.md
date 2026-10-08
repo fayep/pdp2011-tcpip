@@ -1,4 +1,4 @@
-# RSTS/E TCP/IP V0.4 — Programmer's Guide
+# RSTS/E TCP/IP V1.00 — Programmer's Guide
 
 Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0: free for
 non-commercial use with attribution
@@ -321,6 +321,24 @@ int main(int argc, char **argv)
 It returns 1 when it used the line, 0 when it left `argv` alone. The
 kit's commands all use it.
 
+`cmdqal(word, name, min, &value)` recognises a qualifier: it returns 1
+when `word` is `/name` shortened to at least `min` letters (any case),
+and sets `value` to what follows an `=`, or 0. `CURL.C` and `NC.C` use it:
+
+```c
+for (i = 1; i < argc; i++) {
+	char *v;
+	if (cmdqal(argv[i], "OUTPUT", 3, &v) && v)
+		ofile = v;                      /* /OUTPUT=file, /OUT=file */
+	else if (cmdqal(argv[i], "QUIET", 2, &v))
+		quiet = 1;                      /* /QUIET, /QU */
+	else if (argv[i][0] == '/')
+		printf("?MYPROG: unknown qualifier %s\n", argv[i]);
+	else
+		file = argv[i];                 /* the parameter */
+}
+```
+
 ## Function reference
 
 | Function | Returns | Notes |
@@ -348,6 +366,7 @@ kit's commands all use it.
 | `inet_addr(text)`, `inet_ntoa(addr)` | | Dotted addresses |
 | `sostr(e)`, `soerr` | | Errors |
 | `cmdarg(names, lower, &argc, &argv)` | 1 / 0 | The whole command line (`CMDLIN.H`) |
+| `cmdqal(word, name, min, &value)` | 1 / 0 | Is `word` the qualifier `/name`? (`CMDLIN.H`) |
 
 The `flags` arguments of `send`, `recv`, `sendto` and `recvfrom` are
 ignored; pass 0.

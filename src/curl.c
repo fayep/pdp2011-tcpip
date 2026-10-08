@@ -3,6 +3,8 @@
 /* curl.c - fetch a URL over HTTP for RSTS/E.
  *
  *	CURL [-i] [-h] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
+ *	CURL[/HEADERS][/HEAD][/FOLLOW][/QUIET][/VERBOSE][/INSECURE][/TEXT|/BINARY]
+ *	    [/PROXY=host:port][/OUTPUT=file] url      (the same, RSTS style)
  *
  *	-o file   write the body to file instead of the terminal: a text/...
  *	          response as an RSTS text file (CR LF, no attributes), anything
@@ -308,9 +310,38 @@ int main(int argc, char **argv)
 	cmdarg("CURL", 1, &argc, &argv);
 
 	for (i = 1; i < argc; i++) {
-		if (argv[i][0] == '/') {                /* an RSTS-style qualifier */
-			printf("?CURL: unknown option %s (options start with -)\n", argv[i]);
-			return 1;
+		if (argv[i][0] == '/') {                /* RSTS-style qualifiers */
+			char *v = 0;
+			if ((cmdqal(argv[i], "OUTPUT", 3, &v) || cmdqal(argv[i], "PROXY", 3, &v)) && !v) {
+				printf("?CURL: %s needs a value (%s=...)\n", argv[i], argv[i]);
+				return 1;
+			}
+			if (cmdqal(argv[i], "OUTPUT", 3, &v))
+				ofile = v;
+			else if (cmdqal(argv[i], "HEADERS", 5, &v))
+				opt_i = 1;
+			else if (cmdqal(argv[i], "HEAD", 4, &v))
+				opt_I = 1;
+			else if (cmdqal(argv[i], "FOLLOW", 3, &v))
+				opt_L = 1;
+			else if (cmdqal(argv[i], "PROXY", 3, &v)) {
+				inproxy(v);
+				xgiven = 1;
+			} else if (cmdqal(argv[i], "QUIET", 2, &v))
+				opt_s = 1;
+			else if (cmdqal(argv[i], "VERBOSE", 3, &v))
+				opt_v = 1;
+			else if (cmdqal(argv[i], "INSECURE", 3, &v))
+				opt_k = 1;
+			else if (cmdqal(argv[i], "TEXT", 2, &v))
+				opt_t = 1;
+			else if (cmdqal(argv[i], "BINARY", 2, &v))
+				opt_b = 1;
+			else {
+				printf("?CURL: unknown qualifier %s\n", argv[i]);
+				return 1;
+			}
+			continue;
 		}
 		if (argv[i][0] == '-' && argv[i][1]) {
 			switch (lower(argv[i][1])) {

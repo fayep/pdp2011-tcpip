@@ -75,3 +75,22 @@ int cmdarg(char *names, int lower, int *argcp, char ***argvp)
 	*argvp = wv;
 	return 1;
 }
+
+int cmdqal(char *word, char *name, int min, char **value)
+{
+	char *w = word + 1;
+	int n = 0;
+
+	if (*word != '/')
+		return 0;
+	while (w[n] && w[n] != '=')
+		n++;
+	if (n < min || n > (int)strlen(name))
+		return 0;
+	if (value)
+		*value = w[n] == '=' ? w + n + 1 : (char *)0;
+	while (n-- > 0)
+		if (lowc(w[n]) != lowc(name[n]))
+			return 0;
+	return 1;
+}

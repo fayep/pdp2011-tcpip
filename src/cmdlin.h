@@ -23,3 +23,12 @@
  * command word as typed.
  */
 extern int cmdarg(char *names, int lower, int *argcp, char ***argvp);
+
+/* int cmdqal(char *word, char *name, int min, char **value)
+ *
+ * Is word the qualifier /name, abbreviated to at least min letters (any
+ * case)? Returns 1 if so. With "=value" after it, *value points at the
+ * value, otherwise *value is 0 (value may be 0 when none is wanted).
+ * For example cmdqal("/OUT=X.HTM", "OUTPUT", 3, &v) is 1 with v "X.HTM".
+ */
+extern int cmdqal(char *word, char *name, int min, char **value);

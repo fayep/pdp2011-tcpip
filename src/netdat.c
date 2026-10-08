@@ -361,11 +361,14 @@ int main(int argc, char **argv)
 	if (det)                        /* start-up: don't hold up the command file */
 		ethdet();
 
-	/* the network may still be coming up (start-up): wait for an address */
+	/* The network may still be coming up: wait for an address, then look
+	 * the server up and ask it. At start-up (/DETACH) keep trying for about
+	 * five minutes - DHCP, DNS or the server may be slow after a boot;
+	 * typed at a terminal, give up after a minute and say why. */
 	for (i = 0; ; i++) {
 		if (soinfo(&inf) == 0 && inf.up)
 			break;
-		if (i >= 60) {
+		if (i >= (det ? 300 : 60)) {
 			printf("?NETDATE: TCP/IP has no address\n");
 			return 1;
 		}
@@ -374,18 +377,26 @@ int main(int argc, char **argv)
 	memset(&sa, 0, sizeof sa);
 	sa.sin_family = AF_INET;
 	sa.sin_port = htons(NTPPORT);
-	if (server[0]) {
-		if (!(hp = gethostbyname(server))) {
-			printf("?NETDATE: %s: %s\n", server, hstrerror(h_errno));
+	for (i = 0; ; i++) {
+		e = 0;
+		if (server[0]) {
+			if (!(hp = gethostbyname(server)))
+				e = 1;
+			else
+				memcpy(&sa.sin_addr, hp->h_addr, 4);
+		} else
+			memcpy(&sa.sin_addr, inf.gw, 4);
+		if (!e && ask(&sa, &utc, &sub, &at) == 0)
+			break;
+		if (!det || i >= 9) {           /* detached: 10 tries, 30 s apart */
+			if (e)
+				printf("?NETDATE: %s: %s\n", server, hstrerror(h_errno));
+			else
+				printf("?NETDATE: no answer from the time server %s\n",
+				       inet_ntoa(sa.sin_addr));
 			return 1;
 		}
-		memcpy(&sa.sin_addr, hp->h_addr, 4);
-	} else
-		memcpy(&sa.sin_addr, inf.gw, 4);
-
-	if (ask(&sa, &utc, &sub, &at) < 0) {
-		printf("?NETDATE: no answer from the time server %s\n", inet_ntoa(sa.sin_addr));
-		return 1;
+		ethslp(30);
 	}
 	off = zone(utc / 86400L, utc % 86400L);
 	loc = utc + off;

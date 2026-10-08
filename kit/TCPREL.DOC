@@ -1,4 +1,4 @@
-RSTS/E TCP/IP V0.4 - release notes
+RSTS/E TCP/IP V1.00 - release notes
 Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0: free for
 non-commercial use with attribution.
 https://creativecommons.org/licenses/by-nc/4.0/
@@ -44,13 +44,19 @@ TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA).
                                HARDWR HERTZ must match the clock (MiSTer
                                OSD 50/60 Hz), or the time drifts by a
                                sixth however often NETDATE sets it.
-      NC [-i file] [-o file] [-t|-b] host port    a TCP connection on your
-      NC [-i file] [-o file] [-t|-b] -L port      terminal (or wait for one);
-                               -i sends a file, -o saves what arrives (text
-                               or binary as for CURL) - RSTS has no pipes
-      CURL [-i] [-h] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
+      NC[/INPUT=file][/OUTPUT=file][/TEXT|/BINARY] host port
+      NC[/INPUT=file][/OUTPUT=file][/TEXT|/BINARY]/LISTEN=port
+                               a TCP connection on your terminal (or wait
+                               for one); /INPUT sends a file, /OUTPUT
+                               saves what arrives (text or binary as for
+                               CURL) - RSTS has no pipes. Unix-style -i,
+                               -o, -t, -b, -L work too.
+      CURL[/OUTPUT=file][/HEADERS|/HEAD][/FOLLOW][/QUIET][/VERBOSE]
+          [/INSECURE][/TEXT|/BINARY][/PROXY=host:port] url
                                fetch http:// URLs; https:// through a proxy
-                               that does TLS (PROXY host:port in TCPIP.INI)
+                               that does TLS (PROXY host:port in TCPIP.INI).
+                               Unix-style -o, -i, -h, -L, -s, -v, -k, -t,
+                               -b, -x work too.
   - TFTP server, now its own job TFTPD (TFTP NO turns it off)
   - Files received (CURL -o, TFTP put): text (a text/... response, CURL -t,
     TFTP netascii) becomes an ordinary RSTS text file - CR LF lines, no
@@ -100,12 +106,13 @@ Files (TCPIP$: = SY:[0,91]):
 
 Start at boot: add  $ @SY:[0,91]TCPIP.INS  to [0,1]START.COM.
 
-Changes since V0.3: IFCONFIG (interface, DHCP lease and statistics);
+Changes in V1.00 (since V0.3): IFCONFIG (interface, DHCP lease and statistics);
 TLOAD/TDIR (the MiSTer tape library); NETDATE (date and time from a
 network time server) and the monitor's set-time fix in XEPAT; PING and
 NETDATE follow the line clock's rate (50 or 60 Hz); commands read the
 whole line and take RSTS-style qualifiers; CURL's headers-only option is
--h (it was -I, which DCL's upper-casing made the same as -i).
+-h (it was -I, which DCL's upper-casing made the same as -i); CURL and NC
+take RSTS-style qualifiers (/OUTPUT=, /HEAD, /LISTEN=, ...).
 
 V0.3: TCP and NC; UDP and DNS for programs, HOST, CURL; the
 socket library; TFTP moved into its own job; the DEUNA receive crash fix.

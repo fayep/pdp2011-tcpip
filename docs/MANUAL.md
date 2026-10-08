@@ -1,4 +1,4 @@
-# RSTS/E TCP/IP V0.4 — User's Guide
+# RSTS/E TCP/IP V1.00 — User's Guide
 
 Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0: free for
 non-commercial use with attribution
@@ -47,16 +47,16 @@ the PDP2011 core for the MiSTer.
 - Privileges for installing: log in as `[1,2]`.
 - PDP-11 C is **not** needed to install or use the kit, only to build your
   own programs with the socket library.
-- The kit is a SIMH-format tape image, `tcpip_v040.tap`.
+- The kit is a SIMH-format tape image, `tcpip_v100.tap`.
 
 ## Installing
 
 1. **Mount the tape.**
-   - MiSTer (PDP2011 core): copy `tcpip_v040.tap` to `games/PDP2011/` on
+   - MiSTer (PDP2011 core): copy `tcpip_v100.tap` to `games/PDP2011/` on
      the SD card and choose it in the OSD as the tape, or load it from
-     RSTS with `TLOAD tcpip_v040.tap` if you already run a version with
+     RSTS with `TLOAD tcpip_v100.tap` if you already run a version with
      TLOAD.
-   - SIMH: `attach -r tm0 tcpip_v040.tap`.
+   - SIMH: `attach -r tm0 tcpip_v100.tap`.
 2. **Run Auto-Install** as `[1,2]`:
 
        $ @AUTOIN$:AUTOIN
@@ -172,19 +172,27 @@ double quotes:
 
 ## Web pages and HTTPS: CURL and sslproxy
 
+    CURL[/qualifiers] url          or, as Unix curl:
     CURL [-i] [-h] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
 
-| Option | Meaning |
-|---|---|
-| `-o file` | Save the body to a file instead of showing it |
-| `-t` / `-b` | With `-o`: save as text / binary whatever the server says |
-| `-i` | Show the response headers too |
-| `-h` | Ask for the headers only |
-| `-L` | Follow redirects (up to 5) |
-| `-s` | Quiet: no progress or error chatter |
-| `-v` | Show how the proxy's TLS went |
-| `-k` | Fetch even when the certificate does not check out |
-| `-x host:port` | Use this proxy (`-x none`: no proxy); else `PROXY` in TCPIP.INI |
+| Qualifier | Option | Meaning |
+|---|---|---|
+| `/OUTPUT=file` | `-o file` | Save the body to a file instead of showing it |
+| `/TEXT`, `/BINARY` | `-t`, `-b` | With `/OUTPUT`: save as text / binary whatever the server says |
+| `/HEADERS` | `-i` | Show the response headers too |
+| `/HEAD` | `-h` | Ask for the headers only |
+| `/FOLLOW` | `-L` | Follow redirects (up to 5) |
+| `/QUIET` | `-s` | No progress or error chatter |
+| `/VERBOSE` | `-v` | Show how the proxy's TLS went |
+| `/INSECURE` | `-k` | Fetch even when the certificate does not check out |
+| `/PROXY=host:port` | `-x host:port` | Use this proxy (`none`: no proxy); else `PROXY` in TCPIP.INI |
+
+Qualifiers can be shortened to three letters (`/OUT=`, `/FOL`), two for
+`/QU`, `/TE` and `/BI`; `/HEAD` and `/HEADERS` are written out to the
+fifth letter (`/HEADE`). The URL is the parameter, in quotes when its case
+matters:
+
+    $ CURL/FOLLOW/OUTPUT=PAGE.HTM "http://example.com/Some/Path"
 
 **Saved files.** A `text/...` response is saved as an ordinary RSTS text
 file (CR LF lines, no attributes), which EDT and the compilers read.
@@ -274,19 +282,22 @@ for text.
 
 ### NC: a TCP connection
 
-    NC [-i file] [-o file] [-t|-b] host port      connect
-    NC [-i file] [-o file] [-t|-b] -L port        wait for one connection
+    NC[/INPUT=file][/OUTPUT=file][/TEXT|/BINARY] host port    connect
+    NC[/INPUT=file][/OUTPUT=file][/TEXT|/BINARY]/LISTEN=port  wait for one
+    NC [-i file] [-o file] [-t|-b] host port      (the same, Unix style)
+    NC [-i file] [-o file] [-t|-b] -L port
 
 Lines you type are sent (ending CR LF); CTRL/Z sends end-of-file; NC ends
 when the other side closes. RSTS has no pipes, so:
 
-- `-i file` sends a file, then end-of-file (like `nc < file`);
-- `-o file` saves what arrives (like `nc > file`), as text or binary as
-  for CURL (`-t`/`-b` to choose).
+- `/INPUT=file` (`-i file`) sends a file, then end-of-file (like
+  `nc < file`);
+- `/OUTPUT=file` (`-o file`) saves what arrives (like `nc > file`), as
+  text or binary as for CURL (`/TEXT` or `/BINARY` to choose).
 
 Example, copying a file to a Mac (`nc -l 9000 > hello.c` on the Mac):
 
-    $ NC -i HELLO.C 192.168.1.10 9000
+    $ NC/INPUT=HELLO.C 192.168.1.10 9000
 
 ## MiSTer notes
 
