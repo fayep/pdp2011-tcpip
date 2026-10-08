@@ -52,6 +52,8 @@ extern int dwr(int chan, char *buf, int len, int recmod);
 extern int kbset(int kb, int off, int val);
 extern unsigned rpeek(unsigned addr);
 extern int getcc(char *buf);            /* the CCL line in core common (127 max) */
+extern int datnow(void);                /* .DATE: the date word */
+extern int setdt(int date, int time);   /* UU.DAT: 0, or -error */
 extern int uutbl(int fn, char *buf);
 
 #define FRAME_MAX 1514         /* largest frame: header + 1500 */

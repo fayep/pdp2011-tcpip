@@ -26,6 +26,17 @@ TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA).
                                first). Needs MiSTer_pdp2011 with tape
                                library support, Host network not Off.
       TDIR [pattern]           list the tape library (* wildcard)
+      NETDATE [/SET] [server]  the time from a network time server (SNTP):
+                               shows it and how far off the system is;
+                               /SET sets the date and time, to within half
+                               a second. Server: NTP in TCPIP.INI, else the
+                               gateway. Local time from TIMEZONE in
+                               TCPIP.INI (a POSIX TZ string, e.g.
+                               PST8PDT,M3.2.0,M11.1.0 or CET-1CEST,M3.5.0,
+                               M10.5.0/3); TCPIP.INS runs NETDATE /SET at
+                               start-up when TIMEZONE is given. Add the
+                               NTP and TIMEZONE lines to an existing
+                               TCPIP.INI by hand (installation keeps it).
       NC [-i file] [-o file] [-t|-b] host port    a TCP connection on your
       NC [-i file] [-o file] [-t|-b] -L port      terminal (or wait for one);
                                -i sends a file, -o saves what arrives (text
@@ -49,6 +60,10 @@ Monitor fix (XEPATCH, default YES): the RSTS/E V10.1 DEUNA/DELUA driver
 crashes the system when it receives a frame of 629-632 bytes (the frame's
 CRC alone lands in the last of its 632-byte receive buffers and the driver
 copies a negative length). Real DEUNAs and SIMH both produce such frames.
+XEPAT also fixes the monitor's set-time call (UU.DAT): it zeroed the
+clock's tick counter, so the first second after the time was set lasted
+over 4 seconds (Paul Koning's timfix, found by its code pattern). That fix
+is in an overlay and works at once; it is needed for NETDATE.
 XEPAT reads this system's own monitor, checks the exact code, and writes an
 ONLPAT command file that makes the driver skip that copy; ONLPAT verifies
 every old word before it changes anything, so a monitor that differs is

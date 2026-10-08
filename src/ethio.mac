@@ -670,6 +670,34 @@ KBSET::
 	RESTOR
 	RETURN
 
+; int datnow()  - the system date word: (year-1970)*1000 + day of year
+DATNOW::
+	SAVE
+	CALL	CLRXRB
+	.DATE
+	MOV	@#XRB,RESULT(SP)	; the date (XRB+0)
+	RESTOR
+	RETURN
+
+; int setdt(int date, int time)  - set the system date and time (.UUO
+; UU.DAT, -14.; needs DATES privilege). date: (year-1970)*1000 + day of
+; year; time: minutes until midnight (1440 - minutes since midnight); 0
+; leaves either alone. The monitor restarts the seconds at the next minute,
+; so call it on a minute boundary. 0, or minus a RSTS error code.
+UUDAT	= -14.
+SETDT::
+	SAVE
+	CALL	CLRFQ
+	MOVB	#UUDAT,@#FIRQB+FQFUN
+	MOV	ARG1(SP),@#FIRQB+4
+	MOV	ARG2(SP),@#FIRQB+6
+	.UUO
+	CALL	ERRCOD
+	NEG	R0
+	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
 ; int getcc(char *buf)  - RSTS core common (low memory 460: a count byte,
 ; then up to 127 bytes), where a CCL command leaves its whole line, into
 ; buf with a NUL; its length, or 0. The C runtime gets its arguments from

@@ -23,6 +23,8 @@ $! command file from this system's own monitor, which skips that copy; ONLPAT
 $! checks every old word before it writes. Effective from the next boot.
 $! TCPIP.INS repeats the check at every start, so a monitor built later
 $! gets the fix too; XEPATCH NO leaves TCPIP$:XEPAT.NO to turn that off.
+$! XEPAT also fixes setting the time (UU.DAT; NETDATE), which works at once;
+$! only the XE fix needs the reboot (XEPAT then writes XEPAT.RBT too).
 $ XEP = "Y"
 $ _IF F$TYPE(XEPA$$) .NES. "" THEN XEP = F$LEFT(XEPA$$, 1)
 $ _IF F$SEARCH("SY:[0,91]XEPAT.NO") .NES. "" THEN _DELETE/NOLOG SY:[0,91]XEPAT.NO
@@ -35,6 +37,7 @@ $ _WRITE 0 "629-632 bytes can crash this system while TCP/IP runs."
 $ _GOTO NOXE
 $DOXE:
 $ _IF F$SEARCH("AUTWRK$:XEPAT.CMD") .NES. "" THEN _DELETE/NOLOG AUTWRK$:XEPAT.CMD
+$ _IF F$SEARCH("AUTWRK$:XEPAT.RBT") .NES. "" THEN _DELETE/NOLOG AUTWRK$:XEPAT.RBT
 $ _DEFINE/COMMAND/SYSTEM/REPLACE XEPAT AUTWRK$:XEPAT.TSK
 $ _XEPAT AUTWRK$:XEPAT.CMD
 $ _DELETE/COMMAND/SYSTEM XEPAT
@@ -42,6 +45,8 @@ $ _IF F$SEARCH("AUTWRK$:XEPAT.CMD") .EQS. "" THEN _GOTO NOXE
 $ _RUN $ONLPAT
 AUTWRK$:XEPAT.CMD
 $ _DELETE/NOLOG AUTWRK$:XEPAT.CMD
+$ _IF F$SEARCH("AUTWRK$:XEPAT.RBT") .EQS. "" THEN _GOTO NOXE
+$ _DELETE/NOLOG AUTWRK$:XEPAT.RBT
 $ _ASSIGN/SYSTEM/REPLACE SY:[0,91] XEPND$
 $ _WRITE 0 "The DEUNA receive fix is in the monitor file; it takes effect at the"
 $ _WRITE 0 "next boot, and TCP/IP will not start until then."
@@ -60,7 +65,7 @@ $ _WRITE 0 " "
 $ _WRITE 0 "To start TCP/IP at every boot, add this line to your system start-up"
 $ _WRITE 0 "file ([0,1]START.COM) (after DECnet/E, if you run it):"
 $ _WRITE 0 "    $ @SY:[0,91]TCPIP.INS"
-$ _WRITE 0 "To start it now:  @SY:[0,91]TCPIP.INS   (it also defines PING, NC, HOST, CURL, IFCONFIG, TLOAD, TDIR)"
+$ _WRITE 0 "To start it now:  @SY:[0,91]TCPIP.INS   (it also defines PING, NC, HOST, CURL, IFCONFIG, TLOAD, TDIR, NETDATE)"
 $ _WRITE 0 "If an earlier version is running, reboot (needed anyway for the monitor"
 $ _WRITE 0 "fix), or REMOVE its jobs (TCPIPD, TFTPD) and run @SY:[0,91]TCPIP.INS."
 $ _WRITE 0 " "

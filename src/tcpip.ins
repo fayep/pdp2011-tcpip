@@ -14,6 +14,7 @@ $ _DEFINE/COMMAND/SYSTEM/REPLACE CURL TCPIP$:CURL.TSK
 $ _DEFINE/COMMAND/SYSTEM/REPLACE IFCONFIG TCPIP$:IFCONF.TSK
 $ _DEFINE/COMMAND/SYSTEM/REPLACE TLOAD TCPIP$:TLOAD.TSK
 $ _DEFINE/COMMAND/SYSTEM/REPLACE TDIR TCPIP$:TLOAD.TSK
+$ _DEFINE/COMMAND/SYSTEM/REPLACE NETDATE TCPIP$:NETDAT.TSK
 $!
 $! The RSTS/E 10.1 DEUNA/DELUA driver crashes the system on received frames
 $! of 629-632 bytes. XEPAT checks the installed monitor and, when it lacks
@@ -21,17 +22,24 @@ $! the fix (a monitor built since TCP/IP was installed), ONLPAT puts it into
 $! the monitor file. The running monitor keeps the bug until a reboot, so
 $! TCP/IP waits for that; the system logical XEPND$ marks "reboot pending"
 $! and, like every system logical, is gone after the reboot.
+$! XEPAT also fixes setting the time (UU.DAT left the clock's tick counter
+$! at zero, so the first second after a set lasted over 4 s - NETDATE); that
+$! fix is in an overlay and works at once, so it needs no reboot. XEPAT
+$! writes XEPAT.RBT only when the XE fix (resident code) is in XEPAT.CMD.
 $! TCPIP$:XEPAT.NO (installed with XEPATCH NO) turns all of this off.
 $ _IF F$PARSE("XEPND$:",,"DEVICE") .NES. "XEPND$:" THEN _GOTO PENDING
 $ _IF F$SEARCH("TCPIP$:XEPAT.NO") .NES. "" THEN _GOTO START
 $ _IF F$SEARCH("TCPIP$:XEPAT.TSK") .EQS. "" THEN _GOTO START
 $ _IF F$SEARCH("TCPIP$:XEPAT.CMD") .NES. "" THEN _DELETE/NOLOG TCPIP$:XEPAT.CMD
+$ _IF F$SEARCH("TCPIP$:XEPAT.RBT") .NES. "" THEN _DELETE/NOLOG TCPIP$:XEPAT.RBT
 $ _DEFINE/COMMAND/SYSTEM/REPLACE XEPAT TCPIP$:XEPAT.TSK
 $ _XEPAT -Q TCPIP$:XEPAT.CMD
 $ _IF F$SEARCH("TCPIP$:XEPAT.CMD") .EQS. "" THEN _GOTO START
 $ _RUN $ONLPAT
 TCPIP$:XEPAT.CMD
 $ _DELETE/NOLOG TCPIP$:XEPAT.CMD
+$ _IF F$SEARCH("TCPIP$:XEPAT.RBT") .EQS. "" THEN _GOTO START
+$ _DELETE/NOLOG TCPIP$:XEPAT.RBT
 $ _ASSIGN/SYSTEM/REPLACE SY:[0,91] XEPND$
 $PENDING:
 $ _WRITE 0 "TCPIP.INS: the monitor file has the DEUNA receive fix, but the running"
@@ -40,6 +48,9 @@ $ _EXIT
 $START:
 $ _RUN TCPIP$:TCPIPD
 $ _IF F$SEARCH("TCPIP$:TFTPD.TSK") .NES. "" THEN _RUN TCPIP$:TFTPD
+$! the date and time from a time server (NTP / TIMEZONE in TCPIP.INI);
+$! NETDATE detaches and sets the clock at the start of the next minute
+$ _IF F$SEARCH("TCPIP$:NETDAT.TSK") .NES. "" THEN _NETDATE /SET /DETACH
 $ _EXIT
 $NONE:
 $ _WRITE 0 "TCPIP.INS: TCPIP$:TCPIPD.TSK not found; TCP/IP not started"
