@@ -36,6 +36,8 @@ static unsigned pw[24];         /* the NTP packet (48 bytes), word aligned */
 #define pk ((unsigned char *)pw)
 
 static char server[64], tzs[64];
+static char ccline[260];               /* the command line, from core common */
+static char *ccargv[16];
 static int quiet;
 
 /* --- time zone: POSIX TZ ------------------------------------------------ */
@@ -300,6 +302,52 @@ static void readini()
 	fclose(f);
 }
 
+/* qualifiers may be written onto a word, RSTS style (TLOAD/UNLOAD,
+ * NETDATE/SET/QUICK): put a space before each / outside quotes */
+static void qualsp(char *s, int size)
+{
+	int q = 0, n = strlen(s);
+
+	for (; *s; s++, n--) {
+		if (*s == '"')
+			q = !q;
+		else if (*s == '/' && !q && n + 2 < size) {
+			memmove(s + 1, s, n + 1);
+			*s++ = ' ';
+			size--;
+		}
+		size--;
+	}
+}
+
+/* the whole command line (a CCL command leaves it in core common), split
+ * at spaces after qualsp; the runtime's argv when there is none */
+static int fullargs(int argc, char ***argvp)
+{
+	char *p;
+	int n = 0;
+
+	if (getcc(ccline) <= 0)
+		return argc;
+	qualsp(ccline, sizeof ccline);
+	for (p = ccline; *p && n < 15; ) {
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (!*p)
+			break;
+		ccargv[n++] = p;
+		while (*p && *p != ' ' && *p != '\t')
+			p++;
+		if (*p)
+			*p++ = 0;
+	}
+	if (n == 0 || lower(ccargv[0][0]) != 'n' || lower(ccargv[0][1]) != 'e')
+		return argc;            /* not our command line (RUN): keep argv */
+	ccargv[n] = 0;
+	*argvp = ccargv;
+	return n;
+}
+
 /* --- main ---------------------------------------------------------------- */
 
 static char *mon[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -328,6 +376,7 @@ int main(int argc, char **argv)
 	int sub, frac, i, doy, set = 0, det = 0, quick = 0, e;
 	char *w;
 
+	argc = fullargs(argc, &argv);
 	for (i = 1; i < argc; i++) {
 		w = argv[i];
 		if (*w != '/' && *w != '-') {

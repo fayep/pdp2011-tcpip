@@ -111,6 +111,8 @@ reboot).
 ## Commands
 
 Errors are reported in messages starting with `?` and the command's name.
+Qualifiers can be written RSTS style, onto the command (`TLOAD/UNLOAD`,
+`NETDATE/SET/QUICK`), or after a space (`TLOAD /UNLOAD`).
 
 ### PING host [count]
 

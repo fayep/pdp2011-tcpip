@@ -30,7 +30,7 @@
 static unsigned fw[760], rw[760];       /* word arrays: XE buffers must be even */
 #define f ((unsigned char *)fw)
 #define r ((unsigned char *)rw)
-static char ccline[130];
+static char ccline[260];               /* room for qualsp's spaces */
 static int seq;
 
 static int lower(int c)
@@ -127,6 +127,24 @@ static int tdir(char *pat)
 	return 0;
 }
 
+/* qualifiers may be written onto a word, RSTS style (TLOAD/UNLOAD,
+ * NETDATE/SET/QUICK): put a space before each / outside quotes */
+static void qualsp(char *s, int size)
+{
+	int q = 0, n = strlen(s);
+
+	for (; *s; s++, n--) {
+		if (*s == '"')
+			q = !q;
+		else if (*s == '/' && !q && n + 2 < size) {
+			memmove(s + 1, s, n + 1);
+			*s++ = ' ';
+			size--;
+		}
+		size--;
+	}
+}
+
 /* the job that owns MT0: (MOUNT, ASSIGN or an open file), this one
  * included: the owner byte of its DDB (DDJBNO, job number * 2, 0 when
  * free), found through the monitor's device tables as SHOW DEVICE does.
@@ -174,7 +192,11 @@ int main(int argc, char **argv)
 	int n = 0, isdir, e, st, unload = 0;
 
 	/* the whole command line (case kept in quotes), else the runtime's */
-	if (getcc(ccline) > 0) {
+	if (getcc(ccline) > 0 && (lower(ccline[0]) != 't' ||
+	    (lower(ccline[1]) != 'l' && lower(ccline[1]) != 'd')))
+		ccline[0] = 0;          /* not our command line (RUN): use argv */
+	if (ccline[0]) {
+		qualsp(ccline, sizeof ccline);
 		for (p = ccline; *p && n < 4; ) {
 			while (*p == ' ' || *p == '\t')
 				p++;
