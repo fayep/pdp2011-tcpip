@@ -83,7 +83,8 @@ certificate unless -k is given.
 
 Files (TCPIP$: = SY:[0,91]):
   TCPIPD.TSK  the TCP/IP job        TFTPD.TSK  the TFTP server
-  PING.TSK NC.TSK HOST.TSK CURL.TSK  commands
+  PING.TSK NC.TSK HOST.TSK CURL.TSK IFCONF.TSK TLOAD.TSK NETDAT.TSK
+              commands (TLOAD.TSK is both TLOAD and TDIR)
   XEPAT.TSK   the monitor fix check TCPIP.INI  settings
   TCPIP.INS   start-up file (defines the commands)
   SOCK.H TCPMSG.H NETCFG.H SOCK.OBJ RESOLV.OBJ ETHIO.OBJ  for programs
@@ -93,6 +94,8 @@ Start at boot: add  $ @SY:[0,91]TCPIP.INS  to [0,1]START.COM.
 
 Changes since V0.2: TCP and NC; UDP and DNS for programs, HOST, CURL; the
 socket library; TFTP moved into its own job; the DEUNA receive crash fix.
+Later in V0.3: IFCONFIG; TLOAD/TDIR (MiSTer tape library); NETDATE and the
+set-time fix; PING and NETDATE follow a 50 Hz line clock.
 
 Known limits: no IP fragments; no TLS on RSTS itself (use the proxy);
 TCPIPD serves up to 4 TCP connections at a time; SIMH's NAT ignores the
