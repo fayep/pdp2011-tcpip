@@ -12,8 +12,8 @@
  * type 88-B5 on an XE portal; it answers them itself, they never reach the
  * network (Main support/pdp2011/tapelib.h has the format). The drive goes
  * back to the load point with the new tape; MOUNT MT0: as usual after.
- * A tape in use (MOUNTed or assigned by another job) is not swapped:
- * DISMOUNT it first. Needs the XU in the core and Host network not Off.
+ * A tape in use (MOUNTed or ASSIGNed by any job, this one too) is not
+ * swapped: DISMOUNT (or DEASSIGN) it first. Needs the XU in the core and Host network not Off.
  */
 #include <stdio.h>
 #include <string.h>
@@ -126,12 +126,43 @@ static int tdir(char *pat)
 	return 0;
 }
 
-/* MT0: in another job's hands (MOUNT, ASSIGN, open) */
+/* the job that owns MT0: (MOUNT, ASSIGN or an open file), this one
+ * included: the owner byte of its DDB (DDJBNO, job number * 2, 0 when
+ * free), found through the monitor's device tables as SHOW DEVICE does.
+ * 0 when free, -1 when the tables cannot be read. */
+static int mt_owner()
+{
+	unsigned fq[16], devcnt, devptr, devnam, type, maxu, ucp;
+
+	if (uutbl(-3, (char *)fq))
+		return -1;
+	devcnt = fq[3];                 /* maximum unit number of each device */
+	devptr = fq[4];                 /* -> each device's DDB pointers */
+	if (uutbl(-12, (char *)fq))
+		return -1;
+	devnam = fq[3];                 /* device names */
+	for (;;) {
+		type = rpeek(devnam);
+		maxu = rpeek(devcnt);
+		ucp = rpeek(devptr);           /* -> the DDB of each unit */
+		devnam += 2; devcnt += 2; devptr += 2;
+		if (type == 0xFFFF)
+			return -1;              /* no MT in this monitor */
+		if (maxu == 0xFFFF || maxu > 255)
+			continue;               /* no units, or a synonym */
+		if (type == ('M' | 'T' << 8))
+			return (rpeek(rpeek(ucp) + 2) & 0377) / 2;     /* unit 0 */
+	}
+}
+
+/* MT0: in use: by its owner byte, else (no tables) by trying to open it */
 static int mt_busy()
 {
-	int e = dopn("_MT0:", CH_MT, 0);
+	int e, j = mt_owner();
 
-	if (e == 0)
+	if (j >= 0)
+		return j > 0;
+	if ((e = dopn("_MT0:", CH_MT, 0)) == 0)
 		fcls(CH_MT);
 	return e == 3 || e == 8;
 }

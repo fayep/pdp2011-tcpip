@@ -209,7 +209,7 @@ an open proxy. Set it once in TCPIP.INI:
 NETDATE asks a time server (SNTP, UDP port 123): the one named, else `NTP`
 in TCPIP.INI, else the gateway (many home routers answer). It converts the
 time to local time with `TIMEZONE` and, with `/SET`, sets the system clock
-to within half a second. RSTS sets the time in whole minutes and starts
+to within about half a second. RSTS sets the time in whole minutes and starts
 the seconds again from zero, so `/SET` waits for the start of the next
 minute (between 2 and 62 seconds). `/QUICK` sets it at once to the nearest
 minute instead, leaving the clock up to 30 seconds off. Setting needs the DATES privilege (`[1,2]` has
@@ -307,8 +307,8 @@ images can be loaded.
     $ TLOAD /UNLOAD             empty the drive
 
 Names are plain file names; case does not matter. TLOAD will not change a
-tape that another job has mounted or assigned; `DISMOUNT` it first (TLOAD
-does not yet notice a tape mounted by your own job). TLOAD needs *Host
+tape that is mounted or assigned, by any job including your own:
+`DISMOUNT` (or `DEASSIGN`) it first. TLOAD needs *Host
 network* to be something other than Off; the requests go to
 MiSTer_pdp2011 as Ethernet frames and never reach the network.
 

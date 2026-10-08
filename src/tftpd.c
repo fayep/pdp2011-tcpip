@@ -29,7 +29,7 @@
 #define RETRY_SEC 2
 #define MAX_TRY   5
 
-static char cpyrt[] = "RSTS/E TFTPD V0.3  Copyright (c) 2026 Faye Salwin\n"
+static char cpyrt[] = "RSTS/E TFTPD V0.4  Copyright (c) 2026 Faye Salwin\n"
 	"Free for non-commercial use with attribution (CC BY-NC 4.0)\n";
 
 static int s69, sx = -1;                /* the request socket; the transfer's */

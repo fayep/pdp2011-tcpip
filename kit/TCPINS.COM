@@ -5,7 +5,7 @@ $! Runs from AUTWRK$:, which holds the kit files; Auto-Install then copies
 $! them to the final area SY:[0,91] (TCPIP$:).
 $ _SET NOON
 $ ISTAT$ == FALSE
-$ _WRITE 0 "Installing RSTS/E TCP/IP V0.4 (TCP, UDP, DNS, ping, TFTP, NC, HOST, CURL, NETDATE)"
+$ _WRITE 0 "Installing RSTS/E TCP/IP V0.4"
 $ _WRITE 0 " "
 $! FTP$: holds the files TFTP serves and receives
 $ _CREATE/ACCOUNT/NOUSER/NOLOG SY:[0,90]
@@ -66,9 +66,10 @@ $ _WRITE 0 " "
 $ _WRITE 0 "To start TCP/IP at every boot, add this line to your system start-up"
 $ _WRITE 0 "file ([0,1]START.COM) (after DECnet/E, if you run it):"
 $ _WRITE 0 "    $ @SY:[0,91]TCPIP.INS"
-$ _WRITE 0 "To start it now:  @SY:[0,91]TCPIP.INS   (it also defines PING, NC, HOST, CURL, IFCONFIG, TLOAD, TDIR, NETDATE)"
-$ _WRITE 0 "If an earlier version is running, reboot (needed anyway for the monitor"
-$ _WRITE 0 "fix), or REMOVE its jobs (TCPIPD, TFTPD) and run @SY:[0,91]TCPIP.INS."
+$ _WRITE 0 "To start it now:  @SY:[0,91]TCPIP.INS"
+$ _WRITE 0 "(it also defines PING, HOST, IFCONFIG, CURL, NC, NETDATE, TLOAD, TDIR)."
+$ _WRITE 0 "If an earlier version is running, REMOVE its jobs (TCPIPD, TFTPD) first,"
+$ _WRITE 0 "or reboot."
 $ _WRITE 0 " "
 $ ISTAT$ == TRUE
 $ _EXIT

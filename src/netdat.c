@@ -17,7 +17,7 @@
  * RSTS sets the time in whole minutes and starts the seconds again at the
  * next minute, so NETDATE waits for the start of a minute by the server's
  * clock and sets it on the system's second boundary nearest to it: good to
- * half a second. (Needs the set-time fix XEPAT installs; without it the
+ * about half a second. (Needs the set-time fix XEPAT installs; without it the
  * first second after a set lasts over 4 s.)
  * Setting needs DATES privilege. RSTS dates end on 31-Dec-2035.
  */

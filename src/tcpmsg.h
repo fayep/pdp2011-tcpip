@@ -21,7 +21,7 @@
 #define TS_DOWN    3            /* no address yet (DHCP) */
 #define TS_BUSY    4            /* too many requests outstanding */
 
-/* ---- TCP (V0.3) -------------------------------------------------------
+/* ---- TCP ----------------------------------------------------------------
  * A connection's data flows through a pseudo keyboard: TCPIPD holds PKn:,
  * the program opens the matching KBn: in binary mode (MODE 1), reads with
  * RECORD 8192 (no wait) and writes with RECORD 4096 (binary). Control and

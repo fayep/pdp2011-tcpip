@@ -78,7 +78,7 @@ To run a program with arguments, define it as a command:
 ## Examples
 
 Three short programs, in `examples/`, each showing one pattern. They are
-tested on RSTS/E V10.1.
+tested on RSTS/E V10.1 (in SIMH, built exactly as above).
 
 | Program | Shows |
 |---|---|

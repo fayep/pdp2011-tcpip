@@ -35,7 +35,7 @@
 static unsigned bcastw[3] = { 0xFFFF, 0xFFFF, 0xFFFF };
 #define bcast ((unsigned char *)bcastw)
 /* kept in the task image: who wrote it and on what terms */
-static char cpyrt[] = "RSTS/E TCP/IP V0.3  Copyright (c) 2026 Faye Salwin\n"
+static char cpyrt[] = "RSTS/E TCP/IP V0.4  Copyright (c) 2026 Faye Salwin\n"
 	"CC BY-NC 4.0: free for non-commercial use with attribution\n";
 /* Frame buffers are word arrays: PDP-11 C does not align char arrays, and
  * the XE driver takes .READ/.WRITE buffers as given -- an odd one crashes

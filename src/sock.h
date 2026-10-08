@@ -8,7 +8,8 @@
  *  - sonblk(s, 1) makes a socket non-blocking (recv, accept give -1 with
  *    soerr SE_AGAIN); sotmo(s, seconds) bounds a blocking wait (SE_TIMEDOUT).
  *  - a datagram carries at most UDP_MAX (521) bytes.
- *  - names are given as a.b.c.d for now (inet_addr); DNS comes later.
+ *  - no select(): poll non-blocking sockets and sleep with ethslp(1).
+ * Names: gethostbyname() (DNS, RESOLV.OBJ) or inet_addr() for a.b.c.d.
  * Ports in sockaddr_in are in network order, as BSD: use htons().
  */
 #define SOCK_STREAM 1

@@ -29,10 +29,11 @@ TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA).
       NETDATE [/SET] [/QUICK] [server]   the time from a network time
                                server (SNTP): shows it and how far off the
                                system is; /SET sets the date and time, to
-                               within half a second (it waits for the next
+                               about half a second (it waits for the next
                                minute, up to a minute); /QUICK sets it at
-                               once, to the nearest minute. Server: NTP in TCPIP.INI, else the
-                               gateway. Local time from TIMEZONE in
+                               once, to the nearest minute. Server: NTP
+                               in TCPIP.INI, else the gateway. Local time
+                               from TIMEZONE in
                                TCPIP.INI (a POSIX TZ string, e.g.
                                PST8PDT,M3.2.0,M11.1.0 or CET-1CEST,M3.5.0,
                                M10.5.0/3); TCPIP.INS runs NETDATE /SET at
