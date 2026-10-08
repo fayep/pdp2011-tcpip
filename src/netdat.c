@@ -5,6 +5,8 @@
  *	NETDATE [server]          show the server's time and how far off we are
  *	NETDATE /SET [server]     set the system date and time from it
  *	NETDATE /SET /DETACH      the same, detached (for the start-up file)
+ *	NETDATE /QUICK            set it now, to the nearest minute (no wait;
+ *	                          the clock may be up to 30 s off)
  *
  * The server is the one given, else NTP in TCPIP$:TCPIP.INI, else the
  * gateway. The time zone is TIMEZONE in TCPIP.INI, written as a POSIX TZ
@@ -323,22 +325,25 @@ int main(int argc, char **argv)
 	struct sockaddr_in sa;
 	struct hostent *hp;
 	long utc, at, loc, off, now, wait, target, next, y, d;
-	int sub, frac, i, doy, set = 0, det = 0, e;
+	int sub, frac, i, doy, set = 0, det = 0, quick = 0, e;
 	char *w;
 
 	for (i = 1; i < argc; i++) {
 		w = argv[i];
-		if (*w == '/' || *w == '-') {
+		if (*w != '/' && *w != '-') {
+			strncpy(server, w, sizeof server - 1);
+			continue;
+		}
+		for (; w; w = strchr(w + 1, '/')) {     /* /SET/QUICK in one word too */
 			switch (lower(w[1])) {
 			case 's': set = 1; break;
 			case 'd': det = 1; quiet = 1; break;
-			case 'q': quiet = 1; break;
+			case 'q': quick = 1; set = 1; break;
 			default:
-				printf("?NETDATE: NETDATE [/SET] [/DETACH] [server]\n");
+				printf("?NETDATE: NETDATE [/SET] [/QUICK] [/DETACH] [server]\n");
 				return 1;
 			}
-		} else
-			strncpy(server, w, sizeof server - 1);
+		}
 	}
 	hz = linehz();
 	readini();
@@ -401,6 +406,11 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	if (quick) {                    /* now, to the nearest minute */
+		loc = (loc + 30) / 60 * 60;
+		goto setit;
+	}
+
 	/* set it at the start of the next minute, at least 2 s away */
 	next = loc - loc % 60 + 60;
 	wait = (next - loc) * HZ - sub;
@@ -424,6 +434,7 @@ int main(int argc, char **argv)
 		if (target - now > 2 * HZ)
 			ethslp((int)((target - now) / HZ) - 1);
 	}
+setit:
 	civil(loc / 86400L, &y, &doy);
 	e = setdt((int)((y - 1970) * 1000 + doy), (int)(1440L - loc % 86400L / 60));
 	if (e) {
@@ -433,7 +444,7 @@ int main(int argc, char **argv)
 	}
 	if (!quiet) {
 		show("Set to", loc);
-		printf("\n");
+		printf(quick ? " (the nearest minute: up to 30 s off; /SET alone is exact)\n" : "\n");
 	}
 	return 0;
 }

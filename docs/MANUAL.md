@@ -147,7 +147,7 @@ Fetches a web page; see [Web pages and HTTPS](#web-pages-and-https-curl-and-sslp
 
 A TCP connection on your terminal; see [File transfer](#file-transfer-tftp-and-nc).
 
-### NETDATE [/SET] [server]
+### NETDATE [/SET] [/QUICK] [server]
 
 The date and time from a time server; see [NETDATE](#the-date-and-time-netdate).
 
@@ -203,12 +203,16 @@ an open proxy. Set it once in TCPIP.INI:
 
     NETDATE                  show the server's time and how far off the system is
     NETDATE /SET             set the system date and time from it
+    NETDATE /QUICK           set it now, to the nearest minute
     NETDATE /SET server      the same, from this server
 
 NETDATE asks a time server (SNTP, UDP port 123): the one named, else `NTP`
 in TCPIP.INI, else the gateway (many home routers answer). It converts the
 time to local time with `TIMEZONE` and, with `/SET`, sets the system clock
-to within half a second. Setting needs the DATES privilege (`[1,2]` has
+to within half a second. RSTS sets the time in whole minutes and starts
+the seconds again from zero, so `/SET` waits for the start of the next
+minute (between 2 and 62 seconds). `/QUICK` sets it at once to the nearest
+minute instead, leaving the clock up to 30 seconds off. Setting needs the DATES privilege (`[1,2]` has
 it).
 
 `TCPIP.INS` runs `NETDATE /SET` at every start, in the background, when
