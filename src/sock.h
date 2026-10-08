@@ -57,6 +57,11 @@ struct soinf {                  /* TCPIPD's settings (soinfo) */
 	unsigned char dns[2][4];        /* name servers; 0.0.0.0 = none */
 	char domain[33];                /* for short names */
 	char host[33];                  /* our host name */
+	unsigned char mac[6];           /* the interface's Ethernet address */
+	int dhcp, up;                   /* address by DHCP; have an address */
+	long lease;                     /* DHCP: seconds of lease left */
+	long rxpk, rxby, txpk, txby;    /* frames and bytes received / sent */
+	long rxerr, txerr;              /* bad IP packets in; failed sends */
 };
 
 /* gethostbyname: as BSD; h_errno says why it gave 0 */

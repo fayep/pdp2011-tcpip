@@ -63,6 +63,21 @@ static unsigned msgpw[10];              /* message parameters (20 bytes) */
 static unsigned msgdw[256];             /* message data (512 bytes) */
 static int attached = 1;        /* still on the terminal: may print */
 
+/* interface statistics (IFCONFIG) */
+static long rxpk, rxby, txpk, txby, rxerr, txerr;
+
+static int xput(int ch, char *f, int n)         /* ethput, counted */
+{
+	int e = ethput(ch, f, n);
+
+	if (e == 0) {
+		txpk++;
+		txby += n;
+	} else
+		txerr++;
+	return e;
+}
+
 static unsigned cksum_add(unsigned long s, unsigned char *p, int n)
 {
 	while (n > 1) {
@@ -141,7 +156,7 @@ static void udp_send(unsigned char *f, unsigned char *mac, unsigned char *ip, un
 	PUT16(u + 6, 0);
 	PUT16(u + 6, udp_cksum(myip, ip, u, 8 + dlen));
 	n = ETH_HDR + 20 + 8 + dlen;
-	if ((i = ethput(CH_IP, (char *)f, n < 60 ? 60 : n)) != 0 && attached)
+	if ((i = xput(CH_IP, (char *)f, n < 60 ? 60 : n)) != 0 && attached)
 		printf("tcpipd: send to port %u failed, error %d\n", dport, -i);
 }
 
@@ -207,7 +222,7 @@ static void arp_request(unsigned char *ip)
 	PUT16(a + 6, 1);                /* request */
 	memcpy(a + 14, myip, 4);
 	memcpy(a + 24, ip, 4);
-	ethput(CH_ARP, (char *)out, 60);
+	xput(CH_ARP, (char *)out, 60);
 }
 
 /* next hop for dst: dst itself on our network, else the gateway; 0 if none */
@@ -256,7 +271,7 @@ static void arp_input(int n)
 		a[14 + i] = myip[i];
 	}
 	PUT16(a + 6, 2);
-	ethput(CH_ARP, (char *)pkt, 60);
+	xput(CH_ARP, (char *)pkt, 60);
 }
 
 static void ping_reply(unsigned char *ip, unsigned char *ic);
@@ -287,7 +302,7 @@ static void icmp_echo(unsigned char *ip, int hl, int tot)
 	PUT16(ic + 2, 0);
 	PUT16(ic + 2, cksum(ic, tot - hl));
 	n = ETH_HDR + tot;
-	ethput(CH_IP, (char *)pkt, n < 60 ? 60 : n);
+	xput(CH_IP, (char *)pkt, n < 60 ? 60 : n);
 }
 
 /* ---- DHCP client (RFC 2131): DISCOVER, OFFER, REQUEST, ACK; renew at T1 ---- */
@@ -510,7 +525,7 @@ static void ping_send(struct pingq *q, unsigned char *mac)
 		ic[8 + i] = 'a' + i % 23;
 	PUT16(ic + 2, cksum(ic, n));
 	n += ETH_HDR + 20;
-	ethput(CH_IP, (char *)out, n < 60 ? 60 : n);
+	xput(CH_IP, (char *)out, n < 60 ? 60 : n);
 	q->waiting = 0;
 }
 
@@ -775,7 +790,7 @@ static void tcp_send(struct tcb *t, int flags, unsigned long seq, unsigned char 
 	s = cksum_add(s, th, n);
 	PUT16(th + 16, (unsigned)~s & 0xFFFF);
 	n += ETH_HDR + 20;
-	ethput(CH_IP, (char *)out, n < 60 ? 60 : n);
+	xput(CH_IP, (char *)out, n < 60 ? 60 : n);
 }
 
 static void tcp_ack(struct tcb *t)
@@ -1586,11 +1601,20 @@ static int msg_input()                  /* serve queued requests; 1 if any */
 			memcpy(msgp + 2, myip, 4);
 			memcpy(msgp + 6, cfgmsk, 4);
 			memcpy(msgp + 10, cfggw, 4);
-			memset(d, 0, 74);
+			memset(d, 0, 110);
 			memcpy(d, cfgdns, 8);
 			strcpy((char *)d + 8, cfgdom);
 			strcpy((char *)d + 41, cfghst);
-			msgsnd((char *)0, job2, (char *)msgp, (char *)msgdw, 74);
+			memcpy(d + 74, mymac, 6);
+			d[80] = (cfgdhc ? 1 : 0) | (ipup() ? 2 : 0);
+			{
+				long st[7];
+				st[0] = cfgdhc && dhleas ? dhleas - (time((long *)0) - dhgot) : 0L;
+				st[1] = rxpk; st[2] = rxby; st[3] = txpk; st[4] = txby;
+				st[5] = rxerr; st[6] = txerr;
+				memcpy(d + 82, st, sizeof st);
+			}
+			msgsnd((char *)0, job2, (char *)msgp, (char *)msgdw, 110);
 		} else if (msgp[0] == TM_TUNL) {
 			int i;
 			for (i = 0; i < TCB_N; i++)
@@ -1613,19 +1637,25 @@ static void ip_input(int n)
 	int hl, tot, ulen;
 	unsigned sport, dport, c;
 
-	if (n < ETH_HDR + 20 || (ip[0] >> 4) != 4)
+	if (n < ETH_HDR + 20 || (ip[0] >> 4) != 4) {
+		rxerr++;
 		return;
+	}
 	hl = (ip[0] & 15) * 4;
 	tot = GET16(ip + 2);
-	if (hl < 20 || tot < hl + 8 || ETH_HDR + tot > n || cksum(ip, hl) != 0)
+	if (hl < 20 || tot < hl + 8 || ETH_HDR + tot > n || cksum(ip, hl) != 0) {
+		rxerr++;
 		return;
+	}
 	if (!(ipup() && ours(ip + 16))) {
 		/* not (yet) for our address: only DHCP replies, to us or broadcast */
 		if (!cfgdhc || ip[9] != 17 || GET16(ip + hl + 2) != 68)
 			return;
 	}
-	if (GET16(ip + 6) & 0x3FFF)
+	if (GET16(ip + 6) & 0x3FFF) {
+		rxerr++;
 		return;                 /* fragments: not supported */
+	}
 	if (ip[9] == 1) {
 		icmp_echo(ip, hl, tot);
 		return;
@@ -1694,10 +1724,14 @@ int main()
 
 		busy = 0;
 		while ((n = ethget(CH_ARP, (char *)pkt, FRAME_MAX, 0)) > 0) {
+			rxpk++;
+			rxby += n;
 			arp_input(n);
 			busy = 1;
 		}
 		while ((n = ethget(CH_IP, (char *)pkt, FRAME_MAX, 0)) > 0) {
+			rxpk++;
+			rxby += n;
 			ip_input(n);
 			busy = 1;
 		}

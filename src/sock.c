@@ -100,6 +100,17 @@ static void poll()                      /* sort what TCPIPD has sent */
 			memcpy(info.domain, (char *)dw + 8, 33);
 			memcpy(info.host, (char *)dw + 41, 33);
 			info.domain[32] = info.host[32] = 0;
+			memcpy(info.mac, (char *)dw + 74, 6);
+			info.dhcp = ((char *)dw)[80] & 1;
+			info.up = (((char *)dw)[80] & 2) != 0;
+			{
+				long st[7];
+				memcpy(st, (char *)dw + 82, sizeof st);
+				info.lease = st[0];
+				info.rxpk = st[1]; info.rxby = st[2];
+				info.txpk = st[3]; info.txby = st[4];
+				info.rxerr = st[5]; info.txerr = st[6];
+			}
 			infst = p[1];
 			break;
 		case TM_UBNDR:
