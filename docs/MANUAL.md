@@ -307,8 +307,8 @@ images can be loaded.
     $ TLOAD /UNLOAD             empty the drive
 
 Names are plain file names; case does not matter. TLOAD will not change a
-tape that is mounted or assigned, by any job including your own:
-`DISMOUNT` (or `DEASSIGN`) it first. TLOAD needs *Host
+tape that is mounted, allocated or assigned by any job, your own
+included: `DISMOUNT`, `DEALLOCATE` or `DEASSIGN` it first. TLOAD needs *Host
 network* to be something other than Off; the requests go to
 MiSTer_pdp2011 as Ethernet frames and never reach the network.
 

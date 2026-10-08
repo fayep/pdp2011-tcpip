@@ -12,8 +12,9 @@
  * type 88-B5 on an XE portal; it answers them itself, they never reach the
  * network (Main support/pdp2011/tapelib.h has the format). The drive goes
  * back to the load point with the new tape; MOUNT MT0: as usual after.
- * A tape in use (MOUNTed or ASSIGNed by any job, this one too) is not
- * swapped: DISMOUNT (or DEASSIGN) it first. Needs the XU in the core and Host network not Off.
+ * A tape in use (mounted, allocated or assigned by any job, this one too)
+ * is not swapped: DISMOUNT, DEALLOCATE or DEASSIGN it first. Needs the XU
+ * in the core and Host network not Off.
  */
 #include <stdio.h>
 #include <string.h>
@@ -214,7 +215,7 @@ int main(int argc, char **argv)
 		st = tdir(n > 1 ? w[1] : (char *)0);
 	else if (unload || n > 1) {
 		if (mt_busy()) {
-			printf("?TLOAD: MT0: is in use - DISMOUNT or DEASSIGN it first\n");
+			printf("?TLOAD: MT0: is in use - DISMOUNT, DEALLOCATE or DEASSIGN it first\n");
 			ethcls(CH_XE);
 			return 1;
 		}
