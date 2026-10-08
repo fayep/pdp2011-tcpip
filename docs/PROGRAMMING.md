@@ -20,11 +20,12 @@ then look at the [examples](#examples).
 7. [Waiting: blocking, timeouts, non-blocking](#waiting-blocking-timeouts-non-blocking)
 8. [Errors](#errors)
 9. [Settings and the interface: soinfo](#settings-and-the-interface-soinfo)
-10. [Function reference](#function-reference)
-11. [Differences from BSD](#differences-from-bsd)
-12. [Limits](#limits)
-13. [PDP-11 C notes](#pdp-11-c-notes)
-14. [Below the sockets: Ethernet portals](#below-the-sockets-ethernet-portals)
+10. [Command lines](#command-lines)
+11. [Function reference](#function-reference)
+12. [Differences from BSD](#differences-from-bsd)
+13. [Limits](#limits)
+14. [PDP-11 C notes](#pdp-11-c-notes)
+15. [Below the sockets: Ethernet portals](#below-the-sockets-ethernet-portals)
 
 ## How it works
 
@@ -54,6 +55,7 @@ The kit installs everything you need in `TCPIP$:` (`SY:[0,91]`):
 | `SOCK.H` | The declarations: include it |
 | `SOCK.OBJ` | The socket library |
 | `RESOLV.OBJ` | `gethostbyname` (DNS) |
+| `CMDLIN.H`, `CMDLIN.OBJ` | `cmdarg`: the whole command line, split RSTS style (see [Command lines](#command-lines)) |
 | `ETHIO.OBJ` | The RSTS/E system-call layer the library uses (MACRO-11) |
 | `NETCFG.H`, `TCPMSG.H` | Lower-level declarations (see [Below the sockets](#below-the-sockets-ethernet-portals)) |
 | `*.C`, `ETHIO.MAC` | The sources of the library and every command: more examples |
@@ -61,12 +63,13 @@ The kit installs everything you need in `TCPIP$:` (`SY:[0,91]`):
 Copy the headers into your account, compile, and link with the three
 object files:
 
-    $ COPY TCPIP$:SOCK.H *.*
+    $ COPY TCPIP$:SOCK.H,TCPIP$:CMDLIN.H *.*
     $ CCC PROG.C
-    $ LINK/CC/STACK=1024 PROG,TCPIP$:RESOLV,TCPIP$:SOCK,TCPIP$:ETHIO
+    $ LINK/CC/STACK=1024 PROG,TCPIP$:CMDLIN,TCPIP$:RESOLV,TCPIP$:SOCK,TCPIP$:ETHIO
 
 **Give `/STACK=1024`**: the default stack is too small for the library.
-Leave out `TCPIP$:RESOLV` if you never call `gethostbyname`.
+Leave out `TCPIP$:RESOLV` if you never call `gethostbyname`, and
+`TCPIP$:CMDLIN` if you never call `cmdarg`.
 
 To run a program with arguments, define it as a command:
 
@@ -284,6 +287,40 @@ is not running, so it is also the way to ask "is TCP/IP up?":
 `linehz()` returns the line clock's rate, 50 or 60: useful for turning
 RSTS/E's clock ticks into time.
 
+## Command lines
+
+A program run as a command gets only the first 80 characters of its
+line through `argv`, split by the C run-time library. RSTS/E keeps the
+whole line, up to 127 characters, in core common; `cmdarg` (in
+`CMDLIN.H`, `CMDLIN.OBJ`) reads it and replaces `argc` and `argv` with
+its words, split the way RSTS/E commands are:
+
+```c
+#include "cmdlin.h"
+
+int main(int argc, char **argv)
+{
+	cmdarg("MYPROG", 0, &argc, &argv);
+	/* argv[0] is the command word, argv[1].. the rest */
+```
+
+- Words are separated by spaces and tabs.
+- A `/` starts a new word in the command word and in qualifiers:
+  `MYPROG/LIST/BRIEF x` gives `MYPROG`, `/LIST`, `/BRIEF`, `x`. A `/`
+  inside a parameter (a URL, say) does not.
+- `"quoted text"` is one word, without the quotes, with its case and any
+  `/` kept.
+- The first argument names the command, or several separated by spaces
+  (`"TLOAD TDIR"`, for one program with two command names). The line is
+  used only when its first word is one of them (at least two letters), so
+  a program started with `RUN` keeps the run-time library's `argv`.
+- The second argument, if non-zero, lower-cases the unquoted words after
+  the command (DCL upper-cases everything typed outside quotes). It
+  follows that options cannot differ only in case.
+
+It returns 1 when it used the line, 0 when it left `argv` alone. The
+kit's commands all use it.
+
 ## Function reference
 
 | Function | Returns | Notes |
@@ -310,6 +347,7 @@ RSTS/E's clock ticks into time.
 | `htons`, `ntohs`, `htonl`, `ntohl` | | Byte order |
 | `inet_addr(text)`, `inet_ntoa(addr)` | | Dotted addresses |
 | `sostr(e)`, `soerr` | | Errors |
+| `cmdarg(names, lower, &argc, &argv)` | 1 / 0 | The whole command line (`CMDLIN.H`) |
 
 The `flags` arguments of `send`, `recv`, `sendto` and `recvfrom` are
 ignored; pass 0.
@@ -354,9 +392,8 @@ ignored; pass 0.
   over 32767 need a `long`.
 - **The stack**: link with `/STACK=1024` (or more).
 - **Command lines.** A program run as a command gets at most 80
-  characters of arguments, upper-cased by DCL unless quoted. `CURL.C`
-  shows how to read the whole line (127 characters) from core common
-  with `getcc()`.
+  characters of arguments through `argv`, upper-cased by DCL unless
+  quoted: use `cmdarg` (see [Command lines](#command-lines)).
 
 ## Below the sockets: Ethernet portals
 

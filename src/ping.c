@@ -15,6 +15,7 @@
 #include "netcfg.h"
 #include "tcpmsg.h"
 #include "sock.h"
+#include "cmdlin.h"
 
 #define WAIT_SEC 3              /* per echo */
 #define HZ hz                   /* ticks per second (linehz: 50 or 60) */
@@ -50,6 +51,7 @@ int main(int argc, char **argv)
 	long t0, t, tmin = 0, tmax = 0, tsum = 0;
 
 	hz = linehz();
+	cmdarg("PING", 0, &argc, &argv);        /* the whole line (CMDLIN) */
 
 	if (argc > 1) {
 		host = argv[1];

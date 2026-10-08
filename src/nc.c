@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include "netcfg.h"
 #include "sock.h"
+#include "cmdlin.h"
 
 #define SEG 512
 #define CH_IN 10
@@ -109,6 +110,7 @@ int main(int argc, char **argv)
 	unsigned blk = 0, nblk = 0;
 	long size = -1L, sent = 0;
 
+	cmdarg("NC", 0, &argc, &argv);          /* the whole line (CMDLIN) */
 	if (argc < 2) {                         /* ask for the whole line */
 		printf("NC? ");
 		if (!fgets(in, sizeof in, stdin))

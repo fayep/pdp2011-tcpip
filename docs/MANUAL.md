@@ -111,8 +111,7 @@ reboot).
 ## Commands
 
 Errors are reported in messages starting with `?` and the command's name.
-Qualifiers can be written RSTS style, onto the command (`TLOAD/UNLOAD`,
-`NETDATE/SET/QUICK`), or after a space (`TLOAD /UNLOAD`).
+See [Command lines](#command-lines) for how qualifiers and quotes work.
 
 ### PING host [count]
 
@@ -157,24 +156,30 @@ The date and time from a time server; see [NETDATE](#the-date-and-time-netdate).
 
 See [MiSTer notes](#mister-notes).
 
-### Long command lines
+### Command lines
 
-RSTS hands a program only 80 characters of its command line, and DCL
-upper-cases what you type. CURL reads the whole line (up to 127
-characters) itself; put a URL in double quotes to keep its case:
+Every command reads its whole command line, up to 127 characters (RSTS
+hands programs only the first 80 otherwise). Qualifiers can be written
+RSTS style, onto the command or each other (`TLOAD/UNLOAD`,
+`NETDATE/SET/QUICK`), or after spaces. A `/` inside a parameter, such as
+a URL, is left alone.
+
+DCL upper-cases what you type outside quotes, so options cannot differ
+only in case, and anything whose case matters, such as a URL path, goes in
+double quotes:
 
     $ CURL -o page.htm "http://example.com/Some/Path"
 
 ## Web pages and HTTPS: CURL and sslproxy
 
-    CURL [-i] [-I] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
+    CURL [-i] [-h] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
 
 | Option | Meaning |
 |---|---|
 | `-o file` | Save the body to a file instead of showing it |
 | `-t` / `-b` | With `-o`: save as text / binary whatever the server says |
 | `-i` | Show the response headers too |
-| `-I` | Ask for the headers only |
+| `-h` | Ask for the headers only |
 | `-L` | Follow redirects (up to 5) |
 | `-s` | Quiet: no progress or error chatter |
 | `-v` | Show how the proxy's TLS went |
@@ -348,11 +353,12 @@ For PDP-11 C programs: BSD-style sockets in `TCPIP$:SOCK.H` — `socket`,
 `recvfrom`, `shutdown`, `closesocket`, `getsockname`, `getpeername`,
 `gethostbyname`, `htons`, `inet_addr`, `inet_ntoa` and friends, with a few
 extras (`sonblk` non-blocking, `sotmo` timeouts, `soinfo` the settings,
-`linehz` the line-clock rate). Build:
+`linehz` the line-clock rate), and `cmdarg` (`CMDLIN.H`) for reading the
+whole command line RSTS style. `PROGRAMMING.md` is the full guide. Build:
 
-    $ COPY TCPIP$:SOCK.H,TCPIP$:TCPMSG.H,TCPIP$:NETCFG.H *.*
+    $ COPY TCPIP$:SOCK.H,TCPIP$:CMDLIN.H *.*
     $ CCC PROG.C
-    $ LINK/CC/STACK=1024 PROG,TCPIP$:SOCK,TCPIP$:RESOLV,TCPIP$:ETHIO
+    $ LINK/CC/STACK=1024 PROG,TCPIP$:CMDLIN,TCPIP$:RESOLV,TCPIP$:SOCK,TCPIP$:ETHIO
 
 (The default stack is too small for the library: give `/STACK=1024`.)
 

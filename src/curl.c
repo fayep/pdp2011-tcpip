@@ -2,14 +2,16 @@
  * free for non-commercial use with attribution (see LICENSE). */
 /* curl.c - fetch a URL over HTTP for RSTS/E.
  *
- *	CURL [-i] [-I] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
+ *	CURL [-i] [-h] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
  *
  *	-o file   write the body to file instead of the terminal: a text/...
  *	          response as an RSTS text file (CR LF, no attributes), anything
  *	          else as binary (undefined records, exact length in RMS
  *	          attributes)
  *	-t / -b   with -o: treat the body as text / binary whatever its type
- *	-i        show the response headers too;  -I  ask for headers only
+ *	-i        show the response headers too;  -h  ask for headers only
+ *	          (DCL upper-cases what is typed, so options cannot differ
+ *	          only in case)
  *	-L        follow redirects (up to 5)
  *	-s        no progress or error chatter
  *	-v        show how the proxy's TLS went (X-TLS-* headers)
@@ -29,6 +31,7 @@
 #include <stdlib.h>
 #include "netcfg.h"
 #include "sock.h"
+#include "cmdlin.h"
 
 #define MAXREDIR 5
 #define SEG 512
@@ -295,63 +298,26 @@ static void set_length(char *name, long len)
 	fatw(name, w, 7);
 }
 
-/* The C runtime takes arguments from the RSX command buffer: 80
- * characters, cut with "-" - too short for many URLs. A CCL command's
- * whole line (up to 127) is in core common; split it ourselves when it is
- * ours. As DCL does, unquoted words come uppercased (we lowercase them) and
- * "quoted" ones keep their case, so a URL with capitals must be quoted. */
-static char ccline[130], *ccargv[24];
-
-static int fullargs(int *argcp, char ***argvp)
-{
-	char *p, *q;
-	int n = 0;
-
-	if (*argcp < 2 || getcc(ccline) <= 0)
-		return 0;
-	for (p = ccline; *p && n < 23; ) {
-		while (*p == ' ' || *p == '\t')
-			p++;
-		if (!*p)
-			break;
-		if (*p == '"') {                        /* "quoted": case kept */
-			ccargv[n++] = q = ++p;
-			while (*p && *p != '"')
-				*q++ = *p++;
-			if (*p)
-				p++;
-			*q = 0;
-			if (*p == ' ')
-				p++;
-			continue;
-		}
-		ccargv[n++] = p;
-		for (; *p && *p != ' ' && *p != '\t'; p++)
-			*p = lower(*p);
-		if (*p)
-			*p++ = 0;
-	}
-	ccargv[n] = 0;
-	if (n < 2 || !prefix(ccargv[0], (*argvp)[0]))
-		return 0;               /* not our command line: keep the runtime's */
-	*argcp = n;
-	*argvp = ccargv;
-	return 1;
-}
-
 int main(int argc, char **argv)
 {
 	int i, st, redirs = 0, xgiven = 0;
 	char line[200], *u = 0;
 
-	fullargs(&argc, &argv);
+	/* the whole line (CMDLIN): unquoted words lower-cased, as DCL upper-
+	 * cased them; a URL with capitals must be "quoted" */
+	cmdarg("CURL", 1, &argc, &argv);
 
 	for (i = 1; i < argc; i++) {
+		if (argv[i][0] == '/') {                /* an RSTS-style qualifier */
+			printf("?CURL: unknown option %s (options start with -)\n", argv[i]);
+			return 1;
+		}
 		if (argv[i][0] == '-' && argv[i][1]) {
 			switch (lower(argv[i][1])) {
 			case 'i':
-				if (argv[i][1] == 'I') opt_I = 1; else opt_i = 1;
+				opt_i = 1;
 				break;
+			case 'h': opt_I = 1; break;
 			case 'l': opt_L = 1; break;
 			case 's': opt_s = 1; break;
 			case 'v': opt_v = 1; break;

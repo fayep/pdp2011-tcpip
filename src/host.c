@@ -9,6 +9,7 @@
 #include <string.h>
 #include "netcfg.h"
 #include "sock.h"
+#include "cmdlin.h"
 
 static void ip4(char *what, unsigned char *a)
 {
@@ -23,6 +24,7 @@ int main(int argc, char **argv)
 	char line[80], *name, **ap;
 	int i, bad = 0;
 
+	cmdarg("HOST", 1, &argc, &argv);        /* the whole line, lower case (CMDLIN) */
 	if (argc < 2) {
 		if (soinfo(&inf) < 0) {
 			printf("?HOST: %s\n", sostr(soerr));

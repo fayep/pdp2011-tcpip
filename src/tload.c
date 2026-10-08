@@ -20,6 +20,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "netcfg.h"
+#include "cmdlin.h"
 
 #define CH_XE 11
 #define CH_MT 10
@@ -30,7 +31,6 @@
 static unsigned fw[760], rw[760];       /* word arrays: XE buffers must be even */
 #define f ((unsigned char *)fw)
 #define r ((unsigned char *)rw)
-static char ccline[260];               /* room for qualsp's spaces */
 static int seq;
 
 static int lower(int c)
@@ -127,24 +127,6 @@ static int tdir(char *pat)
 	return 0;
 }
 
-/* qualifiers may be written onto a word, RSTS style (TLOAD/UNLOAD,
- * NETDATE/SET/QUICK): put a space before each / outside quotes */
-static void qualsp(char *s, int size)
-{
-	int q = 0, n = strlen(s);
-
-	for (; *s; s++, n--) {
-		if (*s == '"')
-			q = !q;
-		else if (*s == '/' && !q && n + 2 < size) {
-			memmove(s + 1, s, n + 1);
-			*s++ = ' ';
-			size--;
-		}
-		size--;
-	}
-}
-
 /* the job that owns MT0: (MOUNT, ASSIGN or an open file), this one
  * included: the owner byte of its DDB (DDJBNO, job number * 2, 0 when
  * free), found through the monitor's device tables as SHOW DEVICE does.
@@ -188,38 +170,13 @@ static int mt_busy()
 
 int main(int argc, char **argv)
 {
-	char *w[4], *p, *q;
+	char *w[4];
 	int n = 0, isdir, e, st, unload = 0;
 
-	/* the whole command line (case kept in quotes), else the runtime's */
-	if (getcc(ccline) > 0 && (lower(ccline[0]) != 't' ||
-	    (lower(ccline[1]) != 'l' && lower(ccline[1]) != 'd')))
-		ccline[0] = 0;          /* not our command line (RUN): use argv */
-	if (ccline[0]) {
-		qualsp(ccline, sizeof ccline);
-		for (p = ccline; *p && n < 4; ) {
-			while (*p == ' ' || *p == '\t')
-				p++;
-			if (!*p)
-				break;
-			if (*p == '"') {
-				w[n++] = q = ++p;
-				while (*p && *p != '"')
-					q++, p++;
-				if (*p)
-					*p++ = 0;
-				*q = 0;
-				continue;
-			}
-			w[n++] = p;
-			while (*p && *p != ' ' && *p != '\t')
-				p++;
-			if (*p)
-				*p++ = 0;
-		}
-	} else
-		for (n = 0; n < argc && n < 4; n++)
-			w[n] = argv[n];
+	/* the whole command line, split RSTS style (CMDLIN), else argv */
+	cmdarg("TLOAD TDIR", 0, &argc, &argv);
+	for (n = 0; n < argc && n < 4; n++)
+		w[n] = argv[n];
 	isdir = n > 0 && lower(w[0][0]) == 't' && lower(w[0][1]) == 'd';
 	if (n > 1 && (w[1][0] == '/' || w[1][0] == '-')) {
 		if (lower(w[1][1]) != 'u') {

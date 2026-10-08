@@ -48,7 +48,7 @@ TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA).
       NC [-i file] [-o file] [-t|-b] -L port      terminal (or wait for one);
                                -i sends a file, -o saves what arrives (text
                                or binary as for CURL) - RSTS has no pipes
-      CURL [-i] [-I] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
+      CURL [-i] [-h] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
                                fetch http:// URLs; https:// through a proxy
                                that does TLS (PROXY host:port in TCPIP.INI)
   - TFTP server, now its own job TFTPD (TFTP NO turns it off)
@@ -58,10 +58,14 @@ TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA).
     stored with RMS attributes of undefined record format and its exact
     end (end-of-file block and first free byte). Files are sent (TFTP get,
     NC -S) up to that recorded end
+  - Command lines: every command reads its whole line (127 characters)
+    and takes RSTS-style qualifiers (TLOAD/UNLOAD, NETDATE/SET/QUICK) as
+    well as ones after a space.
   - For C programmers: BSD-style sockets (SOCK.H; socket, bind, listen,
-    accept, connect, send, recv, sendto, recvfrom, gethostbyname, ...).
-    Link with  LINK/CC prog,TCPIP$:SOCK,TCPIP$:RESOLV,TCPIP$:ETHIO
-    (compile with the headers from TCPIP$:).
+    accept, connect, send, recv, sendto, recvfrom, gethostbyname, ...),
+    and CMDLIN.H (cmdarg: the whole command line, split RSTS style).
+    Link with  LINK/CC prog,TCPIP$:CMDLIN,TCPIP$:RESOLV,TCPIP$:SOCK,
+    TCPIP$:ETHIO  (compile with the headers from TCPIP$:).
 
 Monitor fix (XEPATCH, default YES): the RSTS/E V10.1 DEUNA/DELUA driver
 crashes the system when it receives a frame of 629-632 bytes (the frame's
@@ -90,15 +94,18 @@ Files (TCPIP$: = SY:[0,91]):
               commands (TLOAD.TSK is both TLOAD and TDIR)
   XEPAT.TSK   the monitor fix check TCPIP.INI  settings
   TCPIP.INS   start-up file (defines the commands)
-  SOCK.H TCPMSG.H NETCFG.H SOCK.OBJ RESOLV.OBJ ETHIO.OBJ  for programs
+  SOCK.H TCPMSG.H NETCFG.H CMDLIN.H SOCK.OBJ RESOLV.OBJ ETHIO.OBJ
+  CMDLIN.OBJ  for programs
   *.C *.MAC  sources
 
 Start at boot: add  $ @SY:[0,91]TCPIP.INS  to [0,1]START.COM.
 
 Changes since V0.3: IFCONFIG (interface, DHCP lease and statistics);
-TLOAD/TDIR (the MiSTer tape library); NETDATE (date and time from a network
-time server) and the monitor's set-time fix in XEPAT; PING and NETDATE
-follow the line clock's rate (50 or 60 Hz).
+TLOAD/TDIR (the MiSTer tape library); NETDATE (date and time from a
+network time server) and the monitor's set-time fix in XEPAT; PING and
+NETDATE follow the line clock's rate (50 or 60 Hz); commands read the
+whole line and take RSTS-style qualifiers; CURL's headers-only option is
+-h (it was -I, which DCL's upper-casing made the same as -i).
 
 V0.3: TCP and NC; UDP and DNS for programs, HOST, CURL; the
 socket library; TFTP moved into its own job; the DEUNA receive crash fix.
