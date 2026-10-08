@@ -37,6 +37,10 @@ TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA).
                                start-up when TIMEZONE is given. Add the
                                NTP and TIMEZONE lines to an existing
                                TCPIP.INI by hand (installation keeps it).
+                               RSTS keeps time by its line clock: INIT
+                               HARDWR HERTZ must match the clock (MiSTer
+                               OSD 50/60 Hz), or the time drifts by a
+                               sixth however often NETDATE sets it.
       NC [-i file] [-o file] [-t|-b] host port    a TCP connection on your
       NC [-i file] [-o file] [-t|-b] -L port      terminal (or wait for one);
                                -i sends a file, -o saves what arrives (text
