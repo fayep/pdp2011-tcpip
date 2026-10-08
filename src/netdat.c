@@ -25,7 +25,8 @@
 #include "netcfg.h"
 #include "sock.h"
 
-#define HZ 60                   /* line clock ticks per second */
+#define HZ hz                   /* line clock ticks per second (linehz) */
+static int hz;
 #define NTPPORT 123
 #define TRIES 3
 
@@ -339,6 +340,7 @@ int main(int argc, char **argv)
 		} else
 			strncpy(server, w, sizeof server - 1);
 	}
+	hz = linehz();
 	readini();
 	if (tzs[0] && !tzparse(tzs)) {
 		printf("?NETDATE: TIMEZONE %s is not a POSIX TZ string\n", tzs);

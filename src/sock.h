@@ -100,6 +100,7 @@ extern int getsockname(int s, struct sockaddr *a, int *alen);
 extern int getpeername(int s, struct sockaddr *a, int *alen);
 extern int sonblk(int s, int on);
 extern int sotmo(int s, int seconds);
+extern int linehz(void);                /* line clock ticks per second: 50 or 60 */
 extern int sokb(int s);                 /* a TCP socket's KB number, or -1 */
 extern unsigned htons(unsigned x);
 extern unsigned ntohs(unsigned x);

@@ -773,3 +773,25 @@ char *sostr(int e)
 	}
 	return "I/O error";
 }
+
+/* the line clock rate (the MiSTer OSD sets 50 or 60 Hz): right after a
+ * second rolls over, the ticks-until-the-next-second counter holds it.
+ * Watch it for a little over a second; measured once. */
+int linehz()
+{
+	static int hz;
+	int w[3], last = -1, top = 0, i;
+
+	if (hz)
+		return hz;
+	for (i = 0; i < 2; ) {          /* until two seconds have rolled over */
+		tickd(w);
+		if (w[2] > top)
+			top = w[2];
+		if (last >= 0 && w[2] > last)
+			i++;
+		last = w[2];
+	}
+	hz = top > 55 ? 60 : 50;
+	return hz;
+}

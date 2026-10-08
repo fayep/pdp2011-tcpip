@@ -17,7 +17,8 @@
 #include "sock.h"
 
 #define WAIT_SEC 3              /* per echo */
-#define HZ 60                   /* ticks per second */
+#define HZ hz                   /* ticks per second (linehz: 50 or 60) */
+static int hz;
 
 static unsigned pw[10], dw[16];  /* word arrays: message buffers must be even */
 #define p ((unsigned char *)pw)
@@ -47,6 +48,8 @@ int main(int argc, char **argv)
 	unsigned char ip[4];
 	int count = 4, i, n, job2, e, sent = 0, got = 0;
 	long t0, t, tmin = 0, tmax = 0, tsum = 0;
+
+	hz = linehz();
 
 	if (argc > 1) {
 		host = argv[1];
