@@ -349,7 +349,7 @@ extras (`sonblk` non-blocking, `sotmo` timeouts, `soinfo` the settings,
 `linehz` the line-clock rate). Build:
 
     $ COPY TCPIP$:SOCK.H,TCPIP$:TCPMSG.H,TCPIP$:NETCFG.H *.*
-    $ CC PROG.C
+    $ CCC PROG.C
     $ LINK/CC/STACK=1024 PROG,TCPIP$:SOCK,TCPIP$:RESOLV,TCPIP$:ETHIO
 
 (The default stack is too small for the library: give `/STACK=1024`.)
