@@ -19,12 +19,22 @@
  * A tape in use (mounted, allocated or assigned by any job, this one too)
  * is not swapped: DISMOUNT, DEALLOCATE or DEASSIGN it first. Needs the XU
  * in the core and Host network not Off.
+ *
+ * RSX-11M-PLUS: TLORSX.C builds this with RSX defined, linked with
+ * RSXIO.MAC instead of ETHIO and CMDLIN. The drive is MS0: (TS11) or MT0:
+ * (TM11), whichever the system has; the XE: driver's line UNA-0 carries
+ * the frames (no DECnet needed). Installed as ...TLO and ...TDI, the MCR
+ * command line gives TLOAD and TDIR.
  */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#ifndef RSX
 #include "netcfg.h"
 #include "cmdlin.h"
+#else
+#include "rsxio.h"
+#endif
 
 #define CH_XE 11
 #define CH_MT 10
@@ -36,6 +46,7 @@ static unsigned fw[760], rw[760];       /* word arrays: XE buffers must be even 
 #define f ((unsigned char *)fw)
 #define r ((unsigned char *)rw)
 static int seq;
+static char *tdev = "MT0:";             /* the tape drive's name, for messages */
 
 static int lower(int c)
 {
@@ -62,8 +73,11 @@ static int ask(int op, char *data, int dlen)
 	f[22] = dlen >> 8; f[23] = dlen;
 	memcpy(f + 24, data, dlen);
 	for (t = 0; t < TRIES; t++) {
+#ifndef RSX
 		while (ethget(CH_XE, (char *)r, 1514, 0) > 0)
-			;                       /* stale answers */
+			;                       /* stale answers (on RSX each read
+						   waits; the seq check drops them) */
+#endif
 		if ((n = ethput(CH_XE, (char *)f, 24 + dlen < 60 ? 60 : 24 + dlen)) != 0) {
 			printf("?TLOAD: cannot send (error %d)\n", -n);
 			return -1;
@@ -87,7 +101,7 @@ static int fail(int st)
 	case 1: printf("?TLOAD: no such tape in the library (TDIR lists them)\n"); break;
 	case 2: printf("?TLOAD: not a tape name (NAME.TAP or NAME.TPC)\n"); break;
 	case 3: printf("?TLOAD: the tape would not mount\n"); break;
-	case 5: printf("MT0: has no tape\n"); return 0;
+	case 5: printf("%s has no tape\n", tdev); return 0;
 	case 6: printf("?TLOAD: no such folder in the library (TDIR lists them)\n"); break;
 	case 7:
 		printf("?TLOAD: more than one tape has that name - give its folder:\n");
@@ -102,7 +116,7 @@ static int fail(int st)
 static void show(char *what)
 {
 	char *n = (char *)r + 24;
-	printf("%s %s on MT0: (%s)\n", what, n, n + strlen(n) + 1);
+	printf("%s %s on %s (%s)\n", what, n, tdev, n + strlen(n) + 1);
 }
 
 /* * matches anything, case ignored */
@@ -177,6 +191,7 @@ static int tdir(char *arg)
 	return 0;
 }
 
+#ifndef RSX
 /* the job that owns MT0: (MOUNT, ASSIGN or an open file), this one
  * included: the owner byte of its DDB (DDJBNO, job number * 2, 0 when
  * free), found through the monitor's device tables as SHOW DEVICE does.
@@ -217,6 +232,55 @@ static int mt_busy()
 		fcls(CH_MT);
 	return e == 3 || e == 8;
 }
+#else
+/* the drive: MS0: (TS11) or MT0: (TM11), in use when mounted with a file
+ * structure or attached by another task (RSXIO tpbusy; MOU/FOR and ALL are
+ * not visible to an unprivileged task) */
+static int mt_busy()
+{
+	int b = tpbusy('M' | 'S' << 8, 0);
+
+	if (b < 0 && (b = tpbusy('M' | 'T' << 8, 0)) >= 0)
+		tdev = "MT0:";
+	return b > 0;
+}
+
+/* the command line, split as CMDLIN does on RSTS: words at spaces, and a /
+ * starts a new word in the command word and in qualifiers. The C run-time
+ * has already read the MCR line (GMCR$ gives it once) into argv, in lower
+ * case and split only at spaces: put it back together, in upper case. */
+static char mcr[100], *mcrw[8];
+
+static void rsxarg(int *argcp, char ***argvp)
+{
+	char *p = mcr, *q;
+	int n = 0, i, split;
+
+	for (i = 0; i < *argcp; i++) {
+		for (q = (*argvp)[i]; *q && p < mcr + 80; q++)
+			*p++ = *q >= 'a' && *q <= 'z' ? *q - 'a' + 'A' : *q;
+		if (p < mcr + 80)
+			*p++ = ' ';
+	}
+	*p = 0;
+	for (p = mcr; *p && n < 8; ) {
+		while (*p == ' ')
+			*p++ = 0;
+		if (!*p)
+			break;
+		split = n == 0 || *p == '/';
+		mcrw[n++] = p++;
+		while (*p && *p != ' ' && !(split && *p == '/'))
+			p++;
+		if (*p == '/') {        /* /QUAL right after a split word */
+			memmove(p + 1, p, strlen(p) + 1);
+			*p++ = 0;
+		}
+	}
+	*argcp = n;
+	*argvp = mcrw;
+}
+#endif
 
 int main(int argc, char **argv)
 {
@@ -224,7 +288,12 @@ int main(int argc, char **argv)
 	int n = 0, isdir, e, st, unload = 0;
 
 	/* the whole command line, split RSTS style (CMDLIN), else argv */
+#ifndef RSX
 	cmdarg("TLOAD TDIR", 0, &argc, &argv);
+#else
+	rsxarg(&argc, &argv);
+	tdev = "MS0:";
+#endif
 	for (n = 0; n < argc && n < 4; n++)
 		w[n] = argv[n];
 	isdir = n > 0 && lower(w[0][0]) == 't' && lower(w[0][1]) == 'd';
@@ -244,7 +313,11 @@ int main(int argc, char **argv)
 		st = tdir(n > 1 ? w[1] : (char *)0);
 	else if (unload || n > 1) {
 		if (mt_busy()) {
+#ifndef RSX
 			printf("?TLOAD: MT0: is in use - DISMOUNT, DEALLOCATE or DEASSIGN it first\n");
+#else
+			printf("?TLOAD: %s is in use - DMO or DEA it first\n", tdev);
+#endif
 			ethcls(CH_XE);
 			return 1;
 		}
@@ -254,7 +327,7 @@ int main(int argc, char **argv)
 				st = fail(r[19]);
 			else {
 				if (unload)
-					printf("MT0: unloaded\n");
+					printf("%s unloaded\n", tdev);
 				else
 					show("Loaded");
 				st = 0;

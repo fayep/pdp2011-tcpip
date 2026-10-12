@@ -10,3 +10,5 @@ docs/autoin/
 
 # built locally from Main_MiSTer_pdp2011 support/pdp2011/tapeconv.cpp
 tools/tapeconv
+rsx/work/
+rsx/work.log

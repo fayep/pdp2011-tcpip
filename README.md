@@ -105,6 +105,37 @@ Tested on the user's MiSTer (2026-10-05): installed and worked first time.
 Next: the MiSTer (with the user's OK). Known: a detached TFTPD keeps devices
 its parent job had assigned (deassign them before detaching).
 
+## RSX-11M-PLUS tools (rsx/)
+
+TLOAD and TDIR for RSX-11M-PLUS, from the same `src/tload.c` (built with
+`RSX` defined by `src/tlorsx.c`). `src/rsxio.mac` is the RSX side of
+ETHIO: the XE: (DEUNA/DELUA) driver's DECnet Direct Line Access interface
+(IO.XOP line UNA-0, IO.XSC CC.DST to enable the protocol, IO.XTM/IO.XRC with
+CC.ADR/CC.PRO/CC.DAD characteristics; LB:[11,10]XEDRV.MAC, LB:[1,1]DEUNA.MLB),
+which needs no DECnet. The kit tape is `dist/pdp2011_rsx_tools_vNNN.tap`
+(ANSI volume TLOAD: TLOAD.TSK, INSTALL.CMD, README.TXT and the sources);
+`rsx/README.TXT` is the user's guide.
+
+    rsx/mkrsxkit.py --rsts sim/tcp_dev.dsk --rsx <RSX-11M-PLUS RP06 disk with XE:>
+
+builds it in two SIMH runs on copies of the disks: RSTS/E compiles TLORSX.C
+with PDP-11 C and writes TLORSX.OBJ and the C kit's RSX library [1,1]CFPURS.OLB
+(CFPURSX.OLB) to an ANSI transfer tape (COPY/BLOCK_SIZE=2048: RSX rejects
+records spanning blocks); RSX reads it, assembles RSXIO, links (`TLOBLD.CMD`,
+`TLOAD.ODL`: RMS-11 from LB:[1,1]RMS11S.ODL) and writes the kit. Neither disk
+ships (DEC software). The RSX system needs one DEUNA in SYSGEN (CSR 174510,
+vector 120) and DRIVER=XE: in SYSPARAM.DAT; XEDRV is loaded into GEN.
+
+Testing in SIMH without a MiSTer: `tools/tlibpeer.py <folder>` answers the
+library's frames (tapelib.cpp's rules) over `attach xu udp:7101:127.0.0.1:7102`
+(127.0.0.1, not localhost: SIMH may pick IPv6). Attach the XU before booting:
+detaching it stops the XU's receive polling.
+
+Limits on RSX: TLOAD tests the drive with IO.ATT, which a file-structured
+mount (MTAACP holds it) or another task's attach refuses; MOU/FOR and ALL do
+not stop an attach, and an unprivileged task cannot see them otherwise
+(GLUN$ reports the same either way; this exec has no EMT-form $SWSTK).
+
 ## License
 
 Copyright (c) 2026 Faye Salwin. Free for non-commercial use with attribution:

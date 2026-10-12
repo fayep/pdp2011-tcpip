@@ -1,0 +1,246 @@
+	.TITLE	RSXIO	RSX-11M-PLUS Ethernet and system access for PDP-11 C
+	.IDENT	/V01.00/
+;
+; Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0:
+; free for non-commercial use with attribution (see LICENSE).
+;
+; The RSX counterpart of ETHIO.MAC, for the same C programs: the routines
+; the tape library (TLOAD.C) needs, with ETHIO's names and arguments where
+; there is one. The Ethernet side is the XE: driver's DECnet Direct Line
+; Access interface (LB:[11,10]XEDRV.MAC; DEUNA.MLB DLXDF$, CHRDF$, EPMDF$),
+; which works without DECnet. Assemble on RSX:
+;	MAC RSXIO,RSXIO=LB:[1,1]DEUNA/ML,SY:RSXIO
+;
+; C calling convention as in ETHIO: arguments pushed right to left, one
+; word reserved for the result, then CALL. On entry 0(SP) return address,
+; 2(SP) result, 4(SP) arg1 ... Every routine saves and restores R0-R5.
+;
+;	int ethopn(int lun, int unit, int ptype, int nbuf)
+;		Assign lun to XEunit:, open its line UNA-unit with a one
+;		second receive timeout and enable protocol type ptype (the
+;		PDP-11 word of the type field: 88-B5 -> 0xB588), unpadded, as
+;		its default owner (frames from any station). nbuf is unused.
+;		Returns 0 or minus an RSX error code.
+;	int ethcls(int lun)
+;	int ethput(int lun, char *buf, int len)
+;		Send the frame in buf as ETHIO does (dst in bytes 0-5, data
+;		from byte 14; the driver fills in src and type), len > 14.
+;		Returns 0 or minus an RSX error code.
+;	int ethget(int lun, char *buf, int size, int wait)
+;		Read one frame into buf as ETHIO does (dst, src, type, data).
+;		Waits up to the line's receive timeout (one second) whatever
+;		wait is. Returns the byte count, -5 when nothing came, or
+;		minus an RSX error code.
+;	int ethslp(int seconds)
+;		Returns 0 at once: ethget has already waited a second.
+;	int tpbusy(int dev, int unit)
+;		Is the tape dev ("MS" or "MT" as a word) unit in use? Attaches
+;		it (IO.ATT) and detaches again: returns 0 when that works, 1
+;		when it is refused (mounted with a file structure: the ACP
+;		holds it) or another task holds the drive for 2 seconds, -1
+;		when there is no such device. MOU/FOR and ALLOCATE do not stop
+;		an attach, and an unprivileged task cannot see them (GLUN$
+;		reports the same either way).
+;	(The C run-time reads the MCR command line with GMCR$ before main:
+;	GMCR$ returns it only once, so programs use argv.)
+
+	.MCALL	QIOW$S,QIO$S,ALUN$S,MRKT$S,WTLO$S,CMKT$S,WTSE$S
+	.MCALL	DLXDF$,CHRDF$
+	DLXDF$
+	CHRDF$
+
+EFN	= 1.		; event flag for QIOW
+EFNT	= 2.		; tpbusy: the attach
+EFNM	= 3.		; tpbusy: the mark time
+TPLUN	= 9.		; tpbusy: the tape's LUN
+LFDEF	= 2		; EPMDF$ LF$DEF: default owner of the protocol
+
+SAVSIZ	= 14		; R0-R5 saved on entry: 6 words
+RESULT	= SAVSIZ+2	; offsets once the registers are saved
+ARG1	= SAVSIZ+4
+ARG2	= SAVSIZ+6
+ARG3	= SAVSIZ+10
+ARG4	= SAVSIZ+12
+
+	.PSECT	RSXIOD,RW,D,GBL,REL,CON
+IOSB:	.BLKW	2
+LINE:	.ASCII	/UNA-0/		; line name for IO.XOP (unit digit patched)
+LINEND:
+	.EVEN
+PTYPE:	.WORD	0		; protocol type of the open line
+; IO.XSC: enable the protocol, default owner, unpadded, any station
+DSTCH:	.WORD	CC.DST,4,0,0
+DSTPRO:	.WORD	0,LFDEF
+DSTEND:
+; IO.XTM: destination address and protocol of the frame
+XMTCH:	.WORD	CC.ADR,6,0,0
+XMTDST:	.BLKW	3
+	.WORD	CC.PRO,2,0,0
+XMTPRO:	.WORD	0
+XMTEND:
+; IO.XRC: the frame's source address
+RCVCH:	.WORD	CC.DAD,6,0,0
+RCVSRC:	.BLKW	3
+RCVEND:
+
+	.PSECT	RSXIO,RO,I,GBL,REL,CON
+
+	.MACRO	SAVE
+	MOV	R0,-(SP)
+	MOV	R1,-(SP)
+	MOV	R2,-(SP)
+	MOV	R3,-(SP)
+	MOV	R4,-(SP)
+	MOV	R5,-(SP)
+	.ENDM
+	.MACRO	RESTOR
+	MOV	(SP)+,R5
+	MOV	(SP)+,R4
+	MOV	(SP)+,R3
+	MOV	(SP)+,R2
+	MOV	(SP)+,R1
+	MOV	(SP)+,R0
+	.ENDM
+
+; R0 := 0 when the directive and the I/O succeeded, else minus the
+; error code (the directive status, else the I/O status byte)
+STAT:	BCS	10$
+	MOVB	IOSB,R0
+	BMI	20$
+	CLR	R0
+	RETURN
+10$:	MOV	@#$DSW,R0
+	BMI	20$
+	NEG	R0
+20$:	RETURN
+
+; Directive macros ($S forms) push their DPB on the stack while they
+; evaluate their arguments, so arguments are never SP-relative: each is
+; loaded into a register first.
+
+ETHOPN::
+	SAVE
+	MOV	ARG1(SP),R5		; lun
+	MOV	ARG2(SP),R4		; unit
+	ALUN$S	R5,#"XE,R4
+	BCS	80$
+	MOV	R4,R0
+	ADD	#'0,R0
+	MOVB	R0,LINEND-1		; UNA-n
+	MOV	ARG3(SP),R0
+	MOV	R0,PTYPE
+	MOV	R0,DSTPRO
+	MOV	R0,XMTPRO
+	QIOW$S	#IO.XOP,R5,#EFN,,#IOSB,,<#LINE,#LINEND-LINE,#1>
+	CALL	STAT
+	BNE	90$
+	QIOW$S	#IO.XSC,R5,#EFN,,#IOSB,,<#DSTCH,#DSTEND-DSTCH>
+	CALL	STAT
+	BEQ	90$
+	MOV	R0,-(SP)		; enable failed: close the line again
+	QIOW$S	#IO.XCL,R5,#EFN,,#IOSB
+	MOV	(SP)+,R0
+	BR	90$
+80$:	MOV	@#$DSW,R0
+90$:	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+ETHCLS::
+	SAVE
+	MOV	ARG1(SP),R5
+	QIOW$S	#IO.XCL,R5,#EFN,,#IOSB
+	CALL	STAT
+	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+ETHPUT::
+	SAVE
+	MOV	ARG2(SP),R1		; the frame
+	MOV	#XMTDST,R2		; its destination address
+	MOVB	(R1)+,(R2)+
+	MOVB	(R1)+,(R2)+
+	MOVB	(R1)+,(R2)+
+	MOVB	(R1)+,(R2)+
+	MOVB	(R1)+,(R2)+
+	MOVB	(R1)+,(R2)+
+	MOV	ARG2(SP),R1
+	ADD	#14.,R1			; data
+	MOV	ARG3(SP),R2
+	SUB	#14.,R2
+	BLE	70$
+	MOV	ARG1(SP),R5
+	QIOW$S	#IO.XTM,R5,#EFN,,#IOSB,,<R1,R2,#XMTCH,#XMTEND-XMTCH>
+	CALL	STAT
+	BR	90$
+70$:	MOV	#IE.BAD,R0
+90$:	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+ETHGET::
+	SAVE
+	MOV	ARG2(SP),R1
+	ADD	#14.,R1			; data goes after the header
+	MOV	ARG3(SP),R2
+	SUB	#14.,R2
+	BLE	70$
+	MOV	ARG1(SP),R5
+	QIOW$S	#IO.XRC,R5,#EFN,,#IOSB,,<R1,R2,#RCVCH,#RCVEND-RCVCH>
+	CALL	STAT
+	BEQ	20$
+	CMP	R0,#IE.TMO
+	BNE	90$
+	MOV	#-5,R0			; nothing came: as ETHIO's NOSUCH
+	BR	90$
+20$:	MOV	ARG2(SP),R1		; header: dst (not known: zero), src, type
+	CLR	(R1)+
+	CLR	(R1)+
+	CLR	(R1)+
+	MOV	#RCVSRC,R2
+	MOV	(R2)+,(R1)+
+	MOV	(R2)+,(R1)+
+	MOV	(R2)+,(R1)+
+	MOV	PTYPE,(R1)
+	MOV	IOSB+2,R0		; bytes received
+	ADD	#14.,R0
+	BR	90$
+70$:	MOV	#IE.BAD,R0
+90$:	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+ETHSLP::
+	CLR	2(SP)
+	RETURN
+
+TPBUSY::
+	SAVE
+	MOV	ARG1(SP),R4		; device name
+	MOV	ARG2(SP),R5		; unit
+	ALUN$S	#TPLUN,R4,R5
+	BCC	10$
+	MOV	#-1,R0
+	BR	90$
+10$:	QIO$S	#IO.ATT,#TPLUN,#EFNT,,#IOSB
+	BCS	80$
+	MRKT$S	#EFNM,#2,#2		; give a busy drive 2 seconds
+	WTLO$S	0,#6			; flag 2 (the attach) or 3 (the time)
+	CMKT$S
+	TSTB	IOSB			; did the attach finish?
+	BNE	20$
+	QIOW$S	#IO.KIL,#TPLUN,#EFN	; no: someone else holds the drive
+	WTSE$S	#EFNT
+	MOV	#1,R0
+	BR	90$
+20$:	BMI	80$			; refused: mounted or allocated
+	QIOW$S	#IO.DET,#TPLUN,#EFN
+	CLR	R0
+	BR	90$
+80$:	MOV	#1,R0
+90$:	MOV	R0,RESULT(SP)
+	RESTOR
+	RETURN
+
+	.END
