@@ -18,14 +18,17 @@ TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA).
       HOST name ...            addresses of names; HOST alone: settings
       IFCONFIG                 the interface: MAC, addresses, DHCP lease,
                                packets and bytes in and out, errors
-      TLOAD name               MiSTer tape library: put NAME.TAP or
-                               NAME.TPC from games/PDP2011 on MT0:, then
+      TLOAD [folder/]name      MiSTer tape library: put NAME.TAP or
+                               NAME.TPC from games/PDP2011 (or a folder
+                               of it, RSTS/V9.6/NAME.TAP) on MT0:, then
                                MOUNT MT0: as usual. TLOAD alone: what is
                                on MT0:; TLOAD /UNLOAD empties the drive.
                                A tape in use is not swapped (DISMOUNT
                                first). Needs MiSTer_pdp2011 with tape
                                library support, Host network not Off.
-      TDIR [pattern]           list the tape library (* wildcard)
+      TDIR [folder]            list the tape library: its folders
+                               (NAME/) and tapes; a folder; or
+      TDIR [folder/]pattern    matching names (* wildcard)
       NETDATE [/SET] [/QUICK] [server]   the time from a network time
                                server (SNTP): shows it and how far off the
                                system is; /SET sets the date and time, to

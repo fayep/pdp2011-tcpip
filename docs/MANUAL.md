@@ -313,18 +313,24 @@ the PDP2011 release (`linux/`), and choose `tap0`; `start_bridge.sh` also
 starts sslproxy on port 3128. Wired Ethernet only.
 
 **Tape library: TLOAD and TDIR.** Load tapes from RSTS instead of the
-OSD. The library is `games/PDP2011` on the SD card; `.tap` and `.tpc`
-images can be loaded.
+OSD. The library is `games/PDP2011` on the SD card and its folders
+(`RSTS/V9.6`, `RSX/...`); `.tap` and `.tpc` images can be loaded.
 
-    $ TDIR                      list the library
-    $ TDIR *.TPC                list matching names (* is a wildcard)
-    $ TLOAD rsts_v9_6_install.tap
+    $ TDIR                      the top: folders (NAME/) and tapes
+    $ TDIR RSTS                 a folder
+    $ TDIR RSTS/V9.6            a folder below it
+    $ TDIR RSTS/V9.6/*RAW*      matching names (* is a wildcard)
+    $ TLOAD RSTS/V9.6/rsts_v9_6_install.tap
     $ MOUNT MT0:
     $ TLOAD                     what is on MT0:
     $ DISMOUNT MT0:
     $ TLOAD /UNLOAD             empty the drive
 
-Names are plain file names; case does not matter. TLOAD will not change a
+Paths use `/` between folders; case does not matter. Folders whose names
+start with `_` (and folders with no tapes in them) are not listed, but a
+tape in one can still be loaded by its path. TDIR's folder listing needs
+MiSTer_pdp2011 with folder support (later than 20261011); older ones list
+only the top. TLOAD will not change a
 tape that is mounted, allocated or assigned by any job, your own
 included: `DISMOUNT`, `DEALLOCATE` or `DEASSIGN` it first. TLOAD needs *Host
 network* to be something other than Off; the requests go to

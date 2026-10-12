@@ -3,12 +3,15 @@
 /* tload.c - TLOAD and TDIR: the MiSTer tape library.
  *
  *	TLOAD name              put tape name (.TAP or .TPC) on MT0:
+ *	TLOAD folder/name       ... from a folder of the library
  *	TLOAD                   show the tape on MT0:
  *	TLOAD /UNLOAD           take the tape off MT0:
- *	TDIR [pattern]          list the library (* matches anything)
+ *	TDIR                    list the library's top: folders (NAME/), tapes
+ *	TDIR folder             list a folder (RSTS, RSTS/V9.6, ...)
+ *	TDIR [folder/]pattern   list matching tapes (* matches anything)
  *
  * The library is the PDP2011 core's directory on the MiSTer
- * (games/PDP2011). Requests go to MiSTer_pdp2011 as Ethernet frames of
+ * (games/PDP2011) and its folders. Requests go to MiSTer_pdp2011 as Ethernet frames of
  * type 88-B5 on an XE portal; it answers them itself, they never reach the
  * network (Main support/pdp2011/tapelib.h has the format). The drive goes
  * back to the load point with the new tape; MOUNT MT0: as usual after.
@@ -82,6 +85,7 @@ static int fail(int st)
 	case 2: printf("?TLOAD: not a tape name (NAME.TAP or NAME.TPC)\n"); break;
 	case 3: printf("?TLOAD: the tape would not mount\n"); break;
 	case 5: printf("MT0: has no tape\n"); return 0;
+	case 6: printf("?TLOAD: no such folder in the library (TDIR lists them)\n"); break;
 	default: printf("?TLOAD: library error %d\n", st);
 	}
 	return 1;
@@ -103,14 +107,46 @@ static int match(char *p, char *s)
 	return *s && lower(*p) == lower(*s) && match(p + 1, s + 1);
 }
 
-static int tdir(char *pat)
+/* one directory request: entries from index first of folder dir ('' = the
+ * top); the reply's data length, or -1 with no answer */
+static int askdir(int first, char *dir)
 {
-	int first = 0, total = 1, shown = 0, n, i, k;
-	char d[2], *p;
+	char d[2 + 80];
+	int l = strlen(dir);
 
+	d[0] = first >> 8; d[1] = first;
+	memcpy(d + 2, dir, l);
+	return ask(3, d, 2 + l);
+}
+
+/* TDIR [arg]: arg a folder lists it, else [folder/]pattern lists the
+ * folder's names that match. Folders show as NAME/. */
+static int tdir(char *arg)
+{
+	int first = 0, total = 1, tapes = 0, dirs = 0, n, i, k;
+	char dir[81], *pat = 0, *p, *s;
+
+	dir[0] = 0;
+	if (arg) {
+		if (strlen(arg) > 80) {
+			printf("?TLOAD: folder name too long\n");
+			return 1;
+		}
+		strcpy(dir, arg);
+		for (i = strlen(dir); i > 0 && dir[i - 1] == '/'; i--)
+			dir[i - 1] = 0;
+		if (askdir(0, dir) >= 0 && r[19] == 6) {        /* not a folder */
+			s = strrchr(dir, '/');
+			pat = arg + (s ? s - dir + 1 : 0);
+			*(s ? s : dir) = 0;
+		}
+	}
 	while (first < total) {
-		d[0] = first >> 8; d[1] = first;
-		if ((n = ask(3, d, 2)) < 4)
+		if ((n = askdir(first, dir)) < 0)
+			return -1;
+		if (r[19])
+			return fail(r[19]);
+		if (n < 4)
 			return -1;
 		total = get16(r + 24);
 		k = get16(r + 26);
@@ -118,12 +154,18 @@ static int tdir(char *pat)
 			break;
 		for (p = (char *)r + 28, i = 0; i < k; i++, p += strlen(p) + 1)
 			if (!pat || match(pat, p)) {
-				printf("  %s\n", p);
-				shown++;
+				printf("  %s%s%s\n", dir, *dir ? "/" : "", p);
+				if (p[strlen(p) - 1] == '/')
+					dirs++;
+				else
+					tapes++;
 			}
 		first += k;
 	}
-	printf("%d tape%s%s\n", shown, shown == 1 ? "" : "s", pat ? " matched" : " in the library");
+	printf("%d tape%s", tapes, tapes == 1 ? "" : "s");
+	if (dirs)
+		printf(", %d folder%s", dirs, dirs == 1 ? "" : "s");
+	printf("%s\n", pat ? " matched" : *dir ? " in this folder" : " at the top of the library");
 	return 0;
 }
 
@@ -180,7 +222,7 @@ int main(int argc, char **argv)
 	isdir = n > 0 && lower(w[0][0]) == 't' && lower(w[0][1]) == 'd';
 	if (n > 1 && (w[1][0] == '/' || w[1][0] == '-')) {
 		if (lower(w[1][1]) != 'u') {
-			printf("?TLOAD: TLOAD name, TLOAD, TLOAD /UNLOAD; TDIR [pattern]\n");
+			printf("?TLOAD: TLOAD [folder/]name, TLOAD, TLOAD /UNLOAD; TDIR [folder | [folder/]pattern]\n");
 			return 1;
 		}
 		unload = 1;
