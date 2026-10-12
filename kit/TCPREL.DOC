@@ -112,8 +112,8 @@ Start at boot: add  $ @SY:[0,91]TCPIP.INS  to [0,1]START.COM.
 
 Changes in V1.01: TDIR lists the MiSTer tape library's folders (TDIR,
 TDIR RSTS, TDIR RSTS/V9.6/*.TAP); TLOAD takes folder/name, and a name
-alone is found in whichever folder has it; needs
-MiSTer_pdp2011 with folder support for the folder listing.
+alone is found in whichever folder has it. Both need MiSTer_pdp2011 with
+folder support.
 
 V1.00 (since V0.3): IFCONFIG (interface, DHCP lease and statistics);
 TLOAD/TDIR (the MiSTer tape library); NETDATE (date and time from a
