@@ -1,4 +1,4 @@
-# RSTS/E TCP/IP V1.00 — User's Guide
+# RSTS/E TCP/IP V1.01 — User's Guide
 
 Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0: free for
 non-commercial use with attribution
@@ -47,16 +47,17 @@ the PDP2011 core for the MiSTer.
 - Privileges for installing: log in as `[1,2]`.
 - PDP-11 C is **not** needed to install or use the kit, only to build your
   own programs with the socket library.
-- The kit is a SIMH-format tape image, `tcpip_v100.tap`.
+- The kit is a SIMH-format tape image, `tcpip_v101.tap`.
 
 ## Installing
 
 1. **Mount the tape.**
-   - MiSTer (PDP2011 core): copy `tcpip_v100.tap` to `games/PDP2011/` on
-     the SD card and choose it in the OSD as the tape, or load it from
-     RSTS with `TLOAD tcpip_v100.tap` if you already run a version with
-     TLOAD.
-   - SIMH: `attach -r tm0 tcpip_v100.tap`.
+   - MiSTer (PDP2011 core): copy `tcpip_v101.tap` to
+     `games/PDP2011/RSTS/Products/` on the SD card and choose it in the
+     OSD as the tape, or load it from RSTS with
+     `TLOAD RSTS/Products/tcpip_v101.tap` if you already run a version
+     with TLOAD.
+   - SIMH: `attach -r tm0 tcpip_v101.tap`.
 2. **Run Auto-Install** as `[1,2]`:
 
        $ @AUTOIN$:AUTOIN

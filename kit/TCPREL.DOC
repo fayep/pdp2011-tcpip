@@ -1,4 +1,4 @@
-RSTS/E TCP/IP V1.00 - release notes
+RSTS/E TCP/IP V1.01 - release notes
 Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0: free for
 non-commercial use with attribution.
 https://creativecommons.org/licenses/by-nc/4.0/
@@ -109,7 +109,11 @@ Files (TCPIP$: = SY:[0,91]):
 
 Start at boot: add  $ @SY:[0,91]TCPIP.INS  to [0,1]START.COM.
 
-Changes in V1.00 (since V0.3): IFCONFIG (interface, DHCP lease and statistics);
+Changes in V1.01: TDIR lists the MiSTer tape library's folders (TDIR,
+TDIR RSTS, TDIR RSTS/V9.6/*.TAP) and TLOAD takes folder/name; needs
+MiSTer_pdp2011 with folder support for the folder listing.
+
+V1.00 (since V0.3): IFCONFIG (interface, DHCP lease and statistics);
 TLOAD/TDIR (the MiSTer tape library); NETDATE (date and time from a
 network time server) and the monitor's set-time fix in XEPAT; PING and
 NETDATE follow the line clock's rate (50 or 60 Hz); commands read the
