@@ -322,12 +322,16 @@ OSD. The library is `games/PDP2011` on the SD card and its folders
     $ TDIR RSTS/V9.6            a folder below it
     $ TDIR RSTS/V9.6/*RAW*      matching names (* is a wildcard)
     $ TLOAD RSTS/V9.6/rsts_v9_6_install.tap
+    $ TLOAD rsts_v9_6_install.tap   the same: a name alone is found
+                                    in whichever folder has it
     $ MOUNT MT0:
     $ TLOAD                     what is on MT0:
     $ DISMOUNT MT0:
     $ TLOAD /UNLOAD             empty the drive
 
-Paths use `/` between folders; case does not matter. Folders whose names
+Paths use `/` between folders; case does not matter. A name without a
+folder is looked for everywhere in the library; if two folders have a tape
+of that name, TLOAD lists both and you give the folder. Folders whose names
 start with `_` (and folders with no tapes in them) are not listed, but a
 tape in one can still be loaded by its path. TDIR's folder listing needs
 MiSTer_pdp2011 with folder support (later than 20261011); older ones list

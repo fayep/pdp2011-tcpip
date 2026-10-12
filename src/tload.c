@@ -2,8 +2,9 @@
  * free for non-commercial use with attribution (see LICENSE). */
 /* tload.c - TLOAD and TDIR: the MiSTer tape library.
  *
- *	TLOAD name              put tape name (.TAP or .TPC) on MT0:
- *	TLOAD folder/name       ... from a folder of the library
+ *	TLOAD name              put tape name (.TAP or .TPC) on MT0:, from
+ *	                        whichever folder of the library has it
+ *	TLOAD folder/name       ... from that folder
  *	TLOAD                   show the tape on MT0:
  *	TLOAD /UNLOAD           take the tape off MT0:
  *	TDIR                    list the library's top: folders (NAME/), tapes
@@ -80,12 +81,19 @@ static int ask(int op, char *data, int dlen)
 
 static int fail(int st)
 {
+	char *n, *e;
+
 	switch (st) {
 	case 1: printf("?TLOAD: no such tape in the library (TDIR lists them)\n"); break;
 	case 2: printf("?TLOAD: not a tape name (NAME.TAP or NAME.TPC)\n"); break;
 	case 3: printf("?TLOAD: the tape would not mount\n"); break;
 	case 5: printf("MT0: has no tape\n"); return 0;
 	case 6: printf("?TLOAD: no such folder in the library (TDIR lists them)\n"); break;
+	case 7:
+		printf("?TLOAD: more than one tape has that name - give its folder:\n");
+		for (n = (char *)r + 24, e = n + get16(r + 22); n < e; n += strlen(n) + 1)
+			printf("  %s\n", n);
+		break;
 	default: printf("?TLOAD: library error %d\n", st);
 	}
 	return 1;

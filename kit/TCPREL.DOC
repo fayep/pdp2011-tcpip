@@ -20,7 +20,8 @@ TCPIPD, on the RSTS/E Ethernet portal interface (XE:, DEUNA/DELUA).
                                packets and bytes in and out, errors
       TLOAD [folder/]name      MiSTer tape library: put NAME.TAP or
                                NAME.TPC from games/PDP2011 (or a folder
-                               of it, RSTS/V9.6/NAME.TAP) on MT0:, then
+                               of it, RSTS/V9.6/NAME.TAP; a name alone is
+                               found in any folder) on MT0:, then
                                MOUNT MT0: as usual. TLOAD alone: what is
                                on MT0:; TLOAD /UNLOAD empties the drive.
                                A tape in use is not swapped (DISMOUNT
@@ -110,7 +111,8 @@ Files (TCPIP$: = SY:[0,91]):
 Start at boot: add  $ @SY:[0,91]TCPIP.INS  to [0,1]START.COM.
 
 Changes in V1.01: TDIR lists the MiSTer tape library's folders (TDIR,
-TDIR RSTS, TDIR RSTS/V9.6/*.TAP) and TLOAD takes folder/name; needs
+TDIR RSTS, TDIR RSTS/V9.6/*.TAP); TLOAD takes folder/name, and a name
+alone is found in whichever folder has it; needs
 MiSTer_pdp2011 with folder support for the folder listing.
 
 V1.00 (since V0.3): IFCONFIG (interface, DHCP lease and statistics);
