@@ -12,3 +12,4 @@ docs/autoin/
 tools/tapeconv
 rsx/work/
 rsx/work.log
+__pycache__/
