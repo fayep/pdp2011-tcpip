@@ -99,6 +99,7 @@ Kit layout (from Auto-Install's own AUTOIN.COM/PRODIN.COM, studied locally):
 The four savesets are written in this order with RSTS BACKUP (/NOACCOUNT_DATA,
 the first with /INITIALIZE/OUT_LABEL=TCPIP). DEC's AUTVER.BCK/AUT101.A are not
 on the tape (tools/mkkit.py, which added them, is kept for reference only).
+docs/AUTO-INSTALL.md describes what Auto-Install expects of a kit.
 
 Tested on the user's MiSTer (2026-10-05): installed and worked first time.
 
@@ -140,4 +141,6 @@ not stop an attach, and an unprivileged task cannot see them otherwise
 
 Copyright (c) 2026 Faye Salwin. Free for non-commercial use with attribution:
 [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/); see LICENSE.
-DEC material (docs/autoin, Auto-Install on the kit tape) is not covered.
+Auto-Install itself is DEC software and is not in this repository. The task
+images on the kit tapes are linked with DEC's PDP-11 C (and, for RSX, RMS-11)
+run-time libraries, which stay DEC's.
