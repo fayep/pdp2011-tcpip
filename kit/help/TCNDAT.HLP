@@ -1,0 +1,29 @@
+ Gets the date and time from a time server (SNTP) and shows how far
+ off the system clock is, or sets it.
+
+ Format:
+     NETDATE [/SET] [/QUICK] [server]
+
+ The server is the one given, else NTP in TCPIP$:TCPIP.INI, else the
+ gateway (many home routers answer). Local time comes from TIMEZONE in
+ TCPIP.INI (a POSIX TZ string such as PST8PDT,M3.2.0,M11.1.0); without
+ it NETDATE shows UTC and will not set the clock (TIMEZONE UTC0 for
+ UTC). TCPIP.INS runs NETDATE /SET at every start when there is a
+ TIMEZONE.
+*Qualifiers
+   /SET      set the system date and time, to about half a second.
+             RSTS sets the time in whole minutes, so NETDATE waits for
+             the start of the next minute (2 to 62 seconds).
+   /QUICK    set it at once, to the nearest minute (up to 30 s off)
+   /DETACH   with /SET: do it as a detached job (for start-up files)
+
+ Setting needs the DATES privilege. RSTS dates end on 31-Dec-2035.
+*TIMEZONE
+ The standard time's name and its hours west of UTC, then the daylight
+ time's name and when it starts and ends (month, week 1-5 with 5 =
+ last, weekday 0 = Sunday, optional time, default 02:00):
+     US Pacific           PST8PDT,M3.2.0,M11.1.0
+     US Eastern           EST5EDT,M3.2.0,M11.1.0
+     UK                   GMT0BST,M3.5.0/1,M10.5.0
+     Central Europe       CET-1CEST,M3.5.0,M10.5.0/3
+     No daylight time     UTC0, JST-9, ...

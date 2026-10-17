@@ -1,0 +1,19 @@
+
+ TDIR lists the MiSTer tape library: the PDP2011 core's folder on the SD
+ card (games/PDP2011) and the folders below it. Folders are shown as
+ NAME/.
+
+   TDIR                    the top: folders and tapes
+   TDIR folder             a folder (RSX, RSTS/V9.6, ...)
+   TDIR [folder/]pattern   matching tapes (* matches anything)
+
+ Case does not matter. Folders whose names start with _, and folders
+ with no tapes below them, are not listed. TLOAD puts a tape on the
+ drive. HELP TDIR EXAMPLE shows one.
+
+2 EXAMPLE
+
+   >TDIR RSX
+     RSX/11M-PLUS_V4.6/
+     RSX/pdp2011_rsx_tools_v101.tap
+   1 tape, 1 folder in this folder

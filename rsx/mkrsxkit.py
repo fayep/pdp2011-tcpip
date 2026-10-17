@@ -198,7 +198,9 @@ def rsx_phase(a, w, xfer, kit):
         for f, n in (('src/rsxio.mac', 'RSXIO.MAC'), ('rsx/TLOBLD.CMD', 'TLOBLD.CMD'),
                      ('rsx/TLOAD.ODL', 'TLOAD.ODL'), ('rsx/INSTALL.CMD', 'INSTALL.CMD'),
                      ('rsx/README.TXT', 'README.TXT'), ('src/tload.c', 'TLOAD.C'),
-                     ('src/tlorsx.c', 'TLORSX.C'), ('src/rsxio.h', 'RSXIO.H')):
+                     ('src/tlorsx.c', 'TLORSX.C'), ('src/rsxio.h', 'RSXIO.H'),
+                     ('rsx/help/TLOAD.HLP', 'TLOAD.HLP'), ('rsx/help/TDIR.HLP', 'TDIR.HLP'),
+                     ('rsx/help/TLOIDX.HLP', 'TLOIDX.HLP')):
             s.type_file(os.path.join(REPO, f), 'PIP %s=TI:' % n, r'\n>\s*$')
         s.cmd('MOU MS0:XFER', r'\n>\s*$', 60)
         for c in ('PIP SY:[200,1]/NV=MS0:TLORSX.OBJ', 'PIP SY:[200,1]/NV/CO=MS0:CFPURS.OLB'):
@@ -235,8 +237,9 @@ def rsx_phase(a, w, xfer, kit):
         out = s.cmd('MOU MS0:TLOAD', r'\n>\s*$', 60)
         if '--' in out:
             raise RuntimeError('MOU failed:\n' + out)
-        for f in ('TLOAD.TSK', 'INSTALL.CMD', 'README.TXT', 'TLOAD.C', 'TLORSX.C', 'RSXIO.H',
-                  'RSXIO.MAC', 'TLOBLD.CMD', 'TLOAD.ODL'):     # one per line: MCR takes 80
+        for f in ('TLOAD.TSK', 'INSTALL.CMD', 'README.TXT', 'TLOAD.HLP', 'TDIR.HLP', 'TLOIDX.HLP',
+                  'TLOAD.C', 'TLORSX.C', 'RSXIO.H', 'RSXIO.MAC', 'TLOBLD.CMD',
+                  'TLOAD.ODL'):     # one per line: MCR takes 80
             out = s.cmd('PIP MS0:/NV=' + f, r'\n>\s*$', 300)
             if '--' in out:
                 raise RuntimeError('writing %s to the kit failed:\n%s' % (f, out))

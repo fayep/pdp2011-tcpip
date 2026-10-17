@@ -1,0 +1,21 @@
+ The MiSTer tape library: puts a tape image from the PDP2011 core's
+ folder on the SD card (games/PDP2011 and its folders) on MT0:, as if
+ you had chosen it in the OSD. MOUNT MT0: as usual after.
+
+ Format:
+     TLOAD name                 a .TAP or .TPC image, any folder
+     TLOAD folder/name          ... from that folder (RSTS/V9.6/X.TAP)
+     TLOAD                      what is on MT0:
+     TLOAD/UNLOAD               empty the drive
+
+ Case does not matter. If two folders have a tape of that name, TLOAD
+ lists them and you give the folder. TDIR lists the library.
+
+ TLOAD will not change a tape that is in use (mounted, allocated or
+ assigned by any job, yours too): DISMOUNT, DEALLOCATE or DEASSIGN it
+ first. It needs the MiSTer with MiSTer_pdp2011 and Host network not
+ Off; elsewhere it says the library does not answer.
+*Example
+     $ TLOAD rsts_v9_6_install.tap
+     Loaded RSTS/V9.6/rsts_v9_6_install.tap on MT0: (SIMH)
+     $ MOUNT/FOREIGN MT0:
