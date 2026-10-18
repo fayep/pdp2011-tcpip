@@ -28,15 +28,20 @@
 	.DATA 	INS LB:[1,54]TLOAD/TASK=...TDI
 	.CLOSE
 .;	HELP: the topic files in LB:[1,2], and an entry for each in the help
-.;	indexes (MCR.HLP for MCR users, HELP.HLP for DCL users), appended
-.;	once: a reinstall finds them there already
+.;	indexes (MCR.HLP for MCR users, HELP.HLP for DCL users): HLPIDX merges
+.;	TLOIDX.HLP's in alphabetically, skipping those there already; the
+.;	previous version of each index stays
 	PIP LB:[1,2]TLOAD.HLP/NV='DEV'TLOAD.HLP
 	PIP LB:[1,2]TDIR.HLP/NV='DEV'TDIR.HLP
 	PIP LB:[1,2]TLOIDX.HLP/NV='DEV'TLOIDX.HLP
-	.SETS IDX "LB:[1,2]MCR.HLP"
-	.GOSUB ADDIDX
-	.SETS IDX "LB:[1,2]HELP.HLP"
-	.GOSUB ADDIDX
+	PIP LB:[1,54]HLPIDX.TMP/NV='DEV'HLPIDX.TSK
+	PIP LB:[1,54]HLPIDX.TSK/NV/CO=LB:[1,54]HLPIDX.TMP
+	PIP LB:[1,54]HLPIDX.TMP;*/DE
+	.IFINS ...HLX REM ...HLX
+	INS LB:[1,54]HLPIDX/TASK=...HLX
+	HLX LB:[1,2]MCR.HLP LB:[1,2]TLOIDX.HLP
+	HLX LB:[1,2]HELP.HLP LB:[1,2]TLOIDX.HLP
+	REM ...HLX
 	PIP LB:[1,2]TLOIDX.HLP;*/DE
 ;
 ; TLOAD and TDIR are installed; HELP TLOAD and HELP TDIR describe them.
@@ -49,21 +54,3 @@
 ; and, on the MiSTer, MiSTer_pdp2011 with the tape library and Host
 ; network not Off. Try TDIR.
 ;
-	.EXIT
-.;
-.;	ADDIDX: append TLOIDX.HLP to the help index IDX unless it has TLOAD
-.ADDIDX:
-	.TESTFILE 'IDX'
-	.IF <FILERR> NE 1 .RETURN
-	.SETF HAVE
-	.OPENR #1 'IDX'
-.AI1:
-	.READ #1 L
-	.IFT <EOF> .GOTO AI2
-	.IF L = "1 TLOAD" .SETT HAVE
-	.GOTO AI1
-.AI2:
-	.CLOSE #1
-	.IFT HAVE .RETURN
-	PIP 'IDX'/NV='IDX',LB:[1,2]TLOIDX.HLP
-	.RETURN

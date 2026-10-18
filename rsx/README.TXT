@@ -33,9 +33,11 @@ Install (privileged account):
 The installer also puts HELP TLOAD and HELP TDIR in place (LB:[1,2]
 TLOAD.HLP and TDIR.HLP, with an entry in MCR.HLP and HELP.HLP).
 
-Files on this tape: TLOAD.TSK, INSTALL.CMD, README.TXT, TLOAD.HLP,
-TDIR.HLP, TLOIDX.HLP, and the sources:
-TLOAD.C TLORSX.C RSXIO.H RSXIO.MAC TLOBLD.CMD TLOAD.ODL. To rebuild:
+Files on this tape: TLOAD.TSK, HLPIDX.TSK (merges help index entries,
+used by the installer), INSTALL.CMD, README.TXT, TLOAD.HLP, TDIR.HLP,
+TLOIDX.HLP, and the sources:
+TLOAD.C TLORSX.C RSXIO.H RSXIO.MAC TLOBLD.CMD TLOAD.ODL HLPIDX.C
+HLPBLD.CMD HLPIDX.ODL. To rebuild:
 compile TLORSX.C with PDP-11 C (RSX target), assemble
     MAC RSXIO,RSXIO=LB:[1,1]DEUNA/ML,SY:RSXIO
 and TKB @TLOBLD with the PDP-11 C library CFPURSX.OLB (as CFPURS.OLB).

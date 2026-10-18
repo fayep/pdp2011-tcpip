@@ -56,10 +56,17 @@ $ _WRITE 0 "The DEUNA receive fix is in the monitor file; it takes effect at the
 $ _WRITE 0 "next boot, and TCP/IP will not start until then."
 $NOXE:
 $! HELP: the topic files (TC*.HLP, TCPIP.HLP) in HELP$:, and an entry for
-$! each in HELP's master file HELP$:HELP.HLP (TCPHLP.COM; once only)
+$! each in HELP's master file HELP$:HELP.HLP: HLPIDX merges TCPIDX.DAT's
+$! in alphabetically, skipping those there already; the first time it keeps
+$! the original as HELP$:HELP.TCP
 $ _COPY/NOLOG/REPLACE AUTWRK$:TC*.HLP HELP$:*.*
 $ _SET FILE/PROTECTION=40 HELP$:TC*.HLP
-$ @AUTWRK$:TCPHLP.COM
+$! (Auto-Install logs programs' output; this line shows on the terminal)
+$ _WRITE 0 "Updating Help index"
+$ _DEFINE/COMMAND/SYSTEM/REPLACE HLPIDX AUTWRK$:HLPIDX.TSK
+$ _HLPIDX HELP$:HELP.HLP AUTWRK$:TCPIDX.DAT HELP$:HELP.TCP
+$ _DELETE/COMMAND/SYSTEM HLPIDX
+$ _SET FILE/PROTECTION=40 HELP$:HELP.HLP
 $! keep the settings of an earlier installation
 $ _IF F$SEARCH("SY:[0,91]TCPIP.INI") .EQS. "" THEN _GOTO NEWINI
 $ _DELETE/NOLOG AUTWRK$:TCPIP.INI
