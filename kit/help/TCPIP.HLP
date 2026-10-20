@@ -1,0 +1,45 @@
+ RSTS/E TCP/IP: an IP stack for RSTS/E 10.1 on the XE: (DEUNA/DELUA)
+ Ethernet portal interface, with these commands:
+
+   PING       test that a host answers
+   HOST       look up names; HOST alone shows the settings
+   IFCONFIG   the interface: addresses, DHCP lease, traffic
+   CURL       fetch a web page (https:// through sslproxy)
+   NC         a TCP connection on your terminal
+   NETDATE    the date and time from a time server
+   TLOAD      the MiSTer tape library: put a tape on MT0:
+   TDIR       the MiSTer tape library: list it
+
+ The settings are in TCPIP$:TCPIP.INI. TCPIP$:TCPIP.INS starts the
+ stack (the TCPIPD and TFTPD jobs) and defines the commands; add
+     $ @SY:[0,91]TCPIP.INS
+ to [0,1]START.COM to have it at every boot.
+
+ Every command reads its whole command line, up to 127 characters, and
+ takes RSTS-style qualifiers (TLOAD/UNLOAD, NETDATE/SET/QUICK). DCL
+ upper-cases what you type outside quotes: put anything whose case
+ matters, such as a URL path, in double quotes.
+*Settings
+ TCPIP$:TCPIP.INI holds one setting per line; ! starts a comment.
+ Changes take effect when TCP/IP next starts. The settings:
+
+   IP        DHCP or a.b.c.d    by DHCP (default), or this address
+   MASK      a.b.c.d            network mask, with a fixed address
+   GATEWAY   a.b.c.d            default gateway, with a fixed address
+   DNS       a.b.c.d [a.b.c.d]  one or two name servers (else from DHCP)
+   DOMAIN    name               tried after short names
+   HOSTNAME  name               sent to DHCP (default: DECnet name)
+   DECNET    1.10 RSTS1         with DECnet/E: its node address, name
+   MAC       08-00-2B-12-34-56  use this Ethernet address
+   UNIT      0                  controller unit (XE0: is 0)
+   DETACH    YES                run TCPIPD and TFTPD as detached jobs
+   TFTP      YES                run the TFTP server (NO turns it off)
+   PROXY     host:port          HTTP proxy for CURL (for https://)
+   NTP       server             time server for NETDATE
+   TIMEZONE  PST8PDT,M3.2.0,M11.1.0   local time zone (POSIX TZ string)
+*Servers
+ TCPIP.INS starts two detached jobs: TCPIPD, the stack itself (ARP,
+ IP, ICMP, UDP, TCP, DHCP), and TFTPD, a TFTP server for the files in
+ FTP$: (a system logical for one account, for example
+     $ ASSIGN/SYSTEM SY:[1,100] FTP$).
+ To stop them, REMOVE their jobs; to restart, run TCPIP.INS again.

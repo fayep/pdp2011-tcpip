@@ -1,4 +1,4 @@
-RSTS/E TCP/IP V1.01 - release notes
+RSTS/E TCP/IP V1.02 - release notes
 Copyright (c) 2026 Faye Salwin. Licensed CC BY-NC 4.0: free for
 non-commercial use with attribution.
 https://creativecommons.org/licenses/by-nc/4.0/
@@ -110,7 +110,12 @@ Files (TCPIP$: = SY:[0,91]):
 
 Start at boot: add  $ @SY:[0,91]TCPIP.INS  to [0,1]START.COM.
 
-Changes in V1.01: TDIR lists the MiSTer tape library's folders (TDIR,
+Changes in V1.02: HELP for every command (HELP TCPIP, HELP PING, ...,
+HELP TLOAD, HELP TDIR): the topic files go to HELP$: and an entry for each
+into HELP's master file HELP$:HELP.HLP by HLPIDX (the first installation
+keeps the original as HELP$:HELP.TCP).
+
+V1.01: TDIR lists the MiSTer tape library's folders (TDIR,
 TDIR RSTS, TDIR RSTS/V9.6/*.TAP); TLOAD takes folder/name, and a name
 alone is found in whichever folder has it. Both need MiSTer_pdp2011 with
 folder support.

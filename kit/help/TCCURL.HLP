@@ -1,0 +1,32 @@
+ Fetches a web page and shows it, or saves it to a file.
+
+ Format:
+     CURL[/qualifiers] url
+     CURL [-i] [-h] [-L] [-s] [-v] [-k] [-t|-b] [-x proxy] [-o file] url
+
+ Put the URL in double quotes when its case matters:
+     $ CURL/FOLLOW/OUTPUT=PAGE.HTM "http://example.com/Some/Path"
+
+ A text/... response is saved as an ordinary RSTS text file; anything
+ else as binary, with its exact length in the file's RMS attributes.
+*Qualifiers
+   /OUTPUT=file   -o file    save the body to a file, not show it
+   /TEXT          -t         with /OUTPUT: save as text, any type
+   /BINARY        -b         with /OUTPUT: save as binary
+   /HEADERS       -i         show the response headers too
+   /HEAD          -h         ask for the headers only
+   /FOLLOW        -L         follow redirects (up to 5)
+   /QUIET         -s         no progress or error chatter
+   /VERBOSE       -v         show how the proxy's TLS went
+   /INSECURE      -k         fetch even if the certificate fails
+   /PROXY=host:port  -x      use this proxy (none: no proxy); else PROXY
+                             in TCPIP.INI
+
+ Qualifiers can be shortened to three letters (/OUT=, /FOL); /HEAD and
+ /HEADERS are written out to the fifth letter (/HEADE).
+*HTTPS
+ RSTS has no TLS. CURL sends https:// requests in plain HTTP to
+ sslproxy (sslproxy.py, on the MiSTer or any machine with Python 3),
+ which fetches the page over TLS, checks the certificate and answers
+ in plain HTTP. Set it once in TCPIP.INI:
+     PROXY    192.168.1.10:3128

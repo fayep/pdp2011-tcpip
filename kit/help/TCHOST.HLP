@@ -1,0 +1,9 @@
+ Looks up names with DNS and prints their addresses. With no name,
+ shows the system's own settings: host name, address, mask, gateway
+ and name servers.
+
+ Format:
+     HOST [name ...]
+*Example
+     $ HOST example.com
+     example.com has address 93.184.215.14

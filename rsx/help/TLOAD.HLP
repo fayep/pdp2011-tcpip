@@ -1,0 +1,30 @@
+
+ TLOAD puts a tape image from the MiSTer tape library on the tape drive,
+ as if you had chosen it in the OSD. The library is the PDP2011 core's
+ folder on the SD card (games/PDP2011) and the folders below it.
+
+   TLOAD name              a .TAP or .TPC image, found in any folder
+   TLOAD folder/name       ... from that folder (RSX/KIT.TAP)
+   TLOAD                   what is on the drive
+   TLOAD/UNLOAD            empty the drive
+
+ Case does not matter. If two folders have a tape of that name, TLOAD
+ lists them and you give the folder. TDIR lists the library. Mount the
+ tape as usual after (MOU MS0:/FOR, MOU MS0:label, BRU, ...).
+
+ The drive is MS0: (the core's Tape controller set to TS11) or MT0:
+ (TM11). TLOAD will not change a tape that is mounted with a file
+ structure or attached by a task, but it cannot see MOU/FOR or ALL: DMO
+ or DEA the tape first.
+
+ TLOAD needs the XE: driver and, on the MiSTer, MiSTer_pdp2011 with Host
+ network not Off; elsewhere it says the library does not answer.
+ HELP TLOAD EXAMPLE shows one.
+
+2 EXAMPLE
+
+   >TLOAD BB-J0830-01.L01_RSX11M+_V4.6_BRU_1999.TAP
+   Loaded RSX/11M-PLUS_V4.6/BB-J0830-01.L01_RSX11M+_V4.6_BRU_1999.tap
+   on MS0: (SIMH)
+   >MOU MS0:/FOR
+   >BRU /DIRECTORY MS0:

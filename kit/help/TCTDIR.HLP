@@ -1,0 +1,16 @@
+ Lists the MiSTer tape library: the PDP2011 core's folder on the SD
+ card (games/PDP2011) and the folders below it. Folders are shown as
+ NAME/.
+
+ Format:
+     TDIR                       the top: folders and tapes
+     TDIR folder                a folder (RSTS, RSTS/V9.6, ...)
+     TDIR [folder/]pattern      matching tapes (* matches anything)
+
+ Case does not matter. Folders whose names start with _, and folders
+ with no tapes below them, are not listed. TLOAD puts a tape on MT0:.
+*Example
+     $ TDIR RSTS/V9.6
+       RSTS/V9.6/rsts_v9_6_install.tap
+       RSTS/V9.6/rsts_v9_6_install_raw.tap
+     2 tapes in this folder

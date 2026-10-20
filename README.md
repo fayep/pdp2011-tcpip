@@ -19,6 +19,10 @@ changes. Written in PDP-11 C with a thin MACRO-11 layer.
 - `src/mactst.c`   prints the hardware address (matches SHOW DEVICE XE)
 - `tools/ethpeer.py` raw-Ethernet test peer over SIMH's UDP Ethernet transport
                    (arp, ping, sniff, get, put)
+- `kit/help/`      HELP topics (HELP TCPIP, PING, ..., TLOAD, TDIR): installed into
+                   HELP$: by TCPINS.COM, with their entries (kit/help/TCPIDX.DAT) merged
+                   into HELP$:HELP.HLP by src/hlpidx.c (HLPIDX); `rsx/help/` the same for
+                   RSX (LB:[1,2], MCR.HLP and HELP.HLP)
 - `kit/`           Auto-Install kit sources: TCPTCP.CFG, TCPINS.COM, TCPIVP.COM,
                    TCPIP.INI (default), TCP010.DAT, TCPREL.DOC, AUTVER.DAT; src/tcpip.ins
 - `dist/tcpip_v010.tap` the kit (SIMH .tap, ANSI volume TCPIP), written entirely by

@@ -5,7 +5,7 @@ $! Runs from AUTWRK$:, which holds the kit files; Auto-Install then copies
 $! them to the final area SY:[0,91] (TCPIP$:).
 $ _SET NOON
 $ ISTAT$ == FALSE
-$ _WRITE 0 "Installing RSTS/E TCP/IP V1.01"
+$ _WRITE 0 "Installing RSTS/E TCP/IP V1.02"
 $ _WRITE 0 " "
 $! FTP$: holds the files TFTP serves and receives
 $ _CREATE/ACCOUNT/NOUSER/NOLOG SY:[0,90]
@@ -19,6 +19,7 @@ $ _IF F$SEARCH("SY:[0,91]TCP020.DAT") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TCP02
 $ _IF F$SEARCH("SY:[0,91]TCP030.DAT") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TCP030.DAT
 $ _IF F$SEARCH("SY:[0,91]TCP040.DAT") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TCP040.DAT
 $ _IF F$SEARCH("SY:[0,91]TCP100.DAT") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TCP100.DAT
+$ _IF F$SEARCH("SY:[0,91]TCP101.DAT") .NES. "" THEN _DELETE/NOLOG SY:[0,91]TCP101.DAT
 $! The RSTS/E 10.1 DEUNA/DELUA driver crashes the system when a received
 $! frame of 629-632 bytes chains so that only its CRC lands in the last
 $! 632-byte buffer (XEREAD copies a length of 0..-3). XEPAT builds an ONLPAT
@@ -54,6 +55,18 @@ $ _ASSIGN/SYSTEM/REPLACE SY:[0,91] XEPND$
 $ _WRITE 0 "The DEUNA receive fix is in the monitor file; it takes effect at the"
 $ _WRITE 0 "next boot, and TCP/IP will not start until then."
 $NOXE:
+$! HELP: the topic files (TC*.HLP, TCPIP.HLP) in HELP$:, and an entry for
+$! each in HELP's master file HELP$:HELP.HLP: HLPIDX merges TCPIDX.DAT's
+$! in alphabetically, skipping those there already; the first time it keeps
+$! the original as HELP$:HELP.TCP
+$ _COPY/NOLOG/REPLACE AUTWRK$:TC*.HLP HELP$:*.*
+$ _SET FILE/PROTECTION=40 HELP$:TC*.HLP
+$! (Auto-Install logs programs' output; this line shows on the terminal)
+$ _WRITE 0 "Updating Help index"
+$ _DEFINE/COMMAND/SYSTEM/REPLACE HLPIDX AUTWRK$:HLPIDX.TSK
+$ _HLPIDX HELP$:HELP.HLP AUTWRK$:TCPIDX.DAT HELP$:HELP.TCP
+$ _DELETE/COMMAND/SYSTEM HLPIDX
+$ _SET FILE/PROTECTION=40 HELP$:HELP.HLP
 $! keep the settings of an earlier installation
 $ _IF F$SEARCH("SY:[0,91]TCPIP.INI") .EQS. "" THEN _GOTO NEWINI
 $ _DELETE/NOLOG AUTWRK$:TCPIP.INI
@@ -69,7 +82,8 @@ $ _WRITE 0 "To start TCP/IP at every boot, add this line to your system start-up
 $ _WRITE 0 "file ([0,1]START.COM) (after DECnet/E, if you run it):"
 $ _WRITE 0 "    $ @SY:[0,91]TCPIP.INS"
 $ _WRITE 0 "To start it now:  @SY:[0,91]TCPIP.INS"
-$ _WRITE 0 "(it also defines PING, HOST, IFCONFIG, CURL, NC, NETDATE, TLOAD, TDIR)."
+$ _WRITE 0 "(it also defines PING, HOST, IFCONFIG, CURL, NC, NETDATE, TLOAD, TDIR;"
+$ _WRITE 0 "HELP TCPIP describes them)."
 $ _WRITE 0 "If an earlier version is running, REMOVE its jobs (TCPIPD, TFTPD) first,"
 $ _WRITE 0 "or reboot."
 $ _WRITE 0 " "

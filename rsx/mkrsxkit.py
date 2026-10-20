@@ -144,16 +144,19 @@ def rsts_phase(a, w):
         out = s.cmd(a.rsts_pass, r'\$ $|attach to\? *$', 60)
         if 'attach to' in out:
             s.cmd('', r'\$ $')
-        for f, n in (('tload.c', 'TLOAD.C'), ('rsxio.h', 'RSXIO.H'), ('tlorsx.c', 'TLORSX.C')):
+        for f, n in (('tload.c', 'TLOAD.C'), ('rsxio.h', 'RSXIO.H'), ('tlorsx.c', 'TLORSX.C'),
+                     ('hlpidx.c', 'HLPIDX.C')):
             s.cmd('DELETE/NOLOG/NOCONFIRM %s' % n, r'\$ $')
             s.type_file(os.path.join(REPO, 'src', f), 'CREATE %s' % n, r'\$ $')
-        out = s.cmd('CCC TLORSX.C', r'\$ $', 600)
-        if re.search(r'%CC-[EF]-|\?[A-Z]', out):
-            raise RuntimeError('CCC failed:\n' + out)
+        for c in ('TLORSX.C', 'HLPIDX.C'):
+            out = s.cmd('CCC ' + c, r'\$ $', 600)
+            if re.search(r'%CC-[EF]-|\?[A-Z]', out):
+                raise RuntimeError('CCC %s failed:\n%s' % (c, out))
         s.cmd('INITIALIZE MT0: XFER/FORMAT=ANSI', r'Proceed.*\? *$')
         s.cmd('Y', r'\$ $', 60)
         s.cmd('MOUNT MT0: XFER', r'\$ $', 60)
-        for c in ('COPY/BLOCK_SIZE=2048 TLORSX.OBJ MT0:TLORSX.OBJ', 'COPY [1,1]CFPURS.OLB MT0:CFPURS.OLB'):
+        for c in ('COPY/BLOCK_SIZE=2048 TLORSX.OBJ MT0:TLORSX.OBJ', 'COPY/BLOCK_SIZE=2048 HLPIDX.OBJ MT0:HLPIDX.OBJ',
+                  'COPY [1,1]CFPURS.OLB MT0:CFPURS.OLB'):
             out = s.cmd(c, r'\$ $', 600)
             if 'copied' not in out:
                 raise RuntimeError(c + ' failed:\n' + out)
@@ -198,10 +201,14 @@ def rsx_phase(a, w, xfer, kit):
         for f, n in (('src/rsxio.mac', 'RSXIO.MAC'), ('rsx/TLOBLD.CMD', 'TLOBLD.CMD'),
                      ('rsx/TLOAD.ODL', 'TLOAD.ODL'), ('rsx/INSTALL.CMD', 'INSTALL.CMD'),
                      ('rsx/README.TXT', 'README.TXT'), ('src/tload.c', 'TLOAD.C'),
-                     ('src/tlorsx.c', 'TLORSX.C'), ('src/rsxio.h', 'RSXIO.H')):
+                     ('src/tlorsx.c', 'TLORSX.C'), ('src/rsxio.h', 'RSXIO.H'),
+                     ('rsx/help/TLOAD.HLP', 'TLOAD.HLP'), ('rsx/help/TDIR.HLP', 'TDIR.HLP'),
+                     ('rsx/help/TLOIDX.HLP', 'TLOIDX.HLP'), ('src/hlpidx.c', 'HLPIDX.C'),
+                     ('rsx/HLPBLD.CMD', 'HLPBLD.CMD'), ('rsx/HLPIDX.ODL', 'HLPIDX.ODL')):
             s.type_file(os.path.join(REPO, f), 'PIP %s=TI:' % n, r'\n>\s*$')
         s.cmd('MOU MS0:XFER', r'\n>\s*$', 60)
-        for c in ('PIP SY:[200,1]/NV=MS0:TLORSX.OBJ', 'PIP SY:[200,1]/NV/CO=MS0:CFPURS.OLB'):
+        for c in ('PIP SY:[200,1]/NV=MS0:TLORSX.OBJ', 'PIP SY:[200,1]/NV=MS0:HLPIDX.OBJ',
+                  'PIP SY:[200,1]/NV/CO=MS0:CFPURS.OLB'):
             out = s.cmd(c, r'\n>\s*$', 300)
             if '--' in out:
                 raise RuntimeError(c + ' failed:\n' + out)
@@ -210,12 +217,13 @@ def rsx_phase(a, w, xfer, kit):
         out = s.cmd('MAC RSXIO,RSXIO=LB:[1,1]DEUNA/ML,SY:[200,1]RSXIO', r'\n>\s*$', 300)
         if 'Errors detected' in out or '--' in out:
             raise RuntimeError('MAC failed:\n' + out)
-        out = s.cmd('TKB @TLOBLD', r'\n>\s*$', 600)
-        if '--' in out:
-            raise RuntimeError('TKB failed:\n' + out)
-        out = s.cmd('PIP TLOAD.TSK/LI', r'\n>\s*$')
-        if 'TLOAD.TSK' not in out:
-            raise RuntimeError('no TLOAD.TSK:\n' + out)
+        for b, t in (('TLOBLD', 'TLOAD.TSK'), ('HLPBLD', 'HLPIDX.TSK')):
+            out = s.cmd('TKB @' + b, r'\n>\s*$', 600)
+            if '--' in out:
+                raise RuntimeError('TKB @%s failed:\n%s' % (b, out))
+            out = s.cmd('PIP %s/LI' % t, r'\n>\s*$')
+            if t not in out:
+                raise RuntimeError('no %s:\n%s' % (t, out))
         rsx_shutup(s)
     finally:
         s.stop()
@@ -235,8 +243,9 @@ def rsx_phase(a, w, xfer, kit):
         out = s.cmd('MOU MS0:TLOAD', r'\n>\s*$', 60)
         if '--' in out:
             raise RuntimeError('MOU failed:\n' + out)
-        for f in ('TLOAD.TSK', 'INSTALL.CMD', 'README.TXT', 'TLOAD.C', 'TLORSX.C', 'RSXIO.H',
-                  'RSXIO.MAC', 'TLOBLD.CMD', 'TLOAD.ODL'):     # one per line: MCR takes 80
+        for f in ('TLOAD.TSK', 'HLPIDX.TSK', 'INSTALL.CMD', 'README.TXT', 'TLOAD.HLP', 'TDIR.HLP',
+                  'TLOIDX.HLP', 'TLOAD.C', 'TLORSX.C', 'RSXIO.H', 'RSXIO.MAC', 'TLOBLD.CMD',
+                  'TLOAD.ODL', 'HLPIDX.C', 'HLPBLD.CMD', 'HLPIDX.ODL'):  # one per line: MCR takes 80
             out = s.cmd('PIP MS0:/NV=' + f, r'\n>\s*$', 300)
             if '--' in out:
                 raise RuntimeError('writing %s to the kit failed:\n%s' % (f, out))

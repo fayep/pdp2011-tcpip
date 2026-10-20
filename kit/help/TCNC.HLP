@@ -1,0 +1,19 @@
+ A TCP connection on your terminal: lines you type are sent (ending CR
+ LF), what arrives is shown. CTRL/Z sends end-of-file; NC ends when
+ the other side closes.
+
+ Format:
+     NC[/qualifiers] host port          connect to a port
+     NC[/qualifiers]/LISTEN=port        wait for one connection
+     NC [-i file] [-o file] [-t|-b] host port      (Unix style)
+     NC [-i file] [-o file] [-t|-b] -L port
+*Qualifiers
+   /INPUT=file    -i file    send a file, then end-of-file
+                              (like nc < file)
+   /OUTPUT=file   -o file    save what arrives (like nc > file)
+   /TEXT          -t         with /OUTPUT: save as text
+   /BINARY        -b         with /OUTPUT: save as binary
+   /LISTEN=port   -L port    wait for a connection instead of making one
+*Example
+ Copy a file to another machine that runs  nc -l 9000 > hello.c :
+     $ NC/INPUT=HELLO.C 192.168.1.10 9000
